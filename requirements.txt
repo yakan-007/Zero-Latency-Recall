@@ -1,0 +1,8 @@
+pdfplumber
+pytesseract
+pdf2image
+python-dotenv
+PyYAML
+# numpy
+# pytest
+watchdog 
