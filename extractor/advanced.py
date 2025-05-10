@@ -171,6 +171,21 @@ class AdvancedExtractor(BaseExtractor):
                 logger.debug(f"Page {page_idx} block {blk_idx}: PaddleOCR returned no result")
                 return None
             lines = [r[1][0] for res_block in result for r in res_block]
+            if not lines:  # 取得行が空の場合、縦書きの可能性を考慮して90/270度回転を試す
+                for rot in (90, 270):
+                    try:
+                        rotated = image.rotate(rot, expand=True)
+                        img_np_rot = np.array(rotated)
+                        result_rot = ocr.ocr(img_np_rot, cls=True)
+                        if result_rot and result_rot[0]:
+                            lines = [r[1][0] for res_block in result_rot for r in res_block]
+                            if lines:
+                                logger.info(
+                                    f"Page {page_idx} block {blk_idx}: 縦書き検出のため {rot}° 回転で OCR 成功"
+                                )
+                                return "\n".join(lines).strip()
+                    except Exception:
+                        continue
             return "\n".join(lines).strip()
         except Exception as e:
             logger.exception(f"Page {page_idx} block {blk_idx}: PaddleOCR error caught")
@@ -180,8 +195,11 @@ class AdvancedExtractor(BaseExtractor):
                 logger.info(
                     f"Page {page_idx} block {blk_idx}: PaddleOCR 失敗のため pytesseract にフォールバックします。"
                 )
-                # pytesseract は PIL.Image を直接受け取れる
-                txt = pytesseract.image_to_string(image, lang="jpn")
+                # まず jpn_vert (縦書き) を優先し、失敗したら通常モデル
+                try:
+                    txt = pytesseract.image_to_string(image, lang="jpn_vert")
+                except pytesseract.TesseractError:
+                    txt = pytesseract.image_to_string(image, lang="jpn")
                 txt = txt.strip()
                 if txt:
                     return txt
