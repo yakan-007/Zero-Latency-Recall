@@ -3,6 +3,9 @@ import sqlite3
 from pathlib import Path
 import subprocess
 import sys
+import difflib
+from typing import Optional
+import re  # 追加
 
 # プロジェクトルートのパスを取得 (zlr-dev)
 PROJECT_ROOT = Path(__file__).parent.parent 
@@ -14,22 +17,51 @@ TEST_DB_PATH = PROJECT_ROOT / "test_zlr.sqlite"
 # extract.py のパス
 EXTRACT_PY_PATH = PROJECT_ROOT / "extract.py"
 
+GROUND_TRUTH_DIR = Path(__file__).parent / "ground_truth"
 
-def run_extract_for_test(pdf_path: Path, db_path: Path, patent_mode: bool = False):
+# --- ヘルパ関数 -------------------------------------------------
+
+# AdvancedExtractor が利用可能か判定するユーティリティ
+def _is_pro_available() -> bool:
+    try:
+        from extractor import AdvancedExtractor  # noqa: F401
+        try:
+            inst = AdvancedExtractor()  # type: ignore
+            del inst
+            return True
+        except (NotImplementedError, RuntimeError, ImportError):
+            return False
+    except Exception:
+        return False
+
+
+def run_extract_for_test(
+    pdf_path: Path,
+    db_path: Path,
+    patent_mode: bool = False,
+    edition: str = "free",
+    force_ocr: bool = False,
+):
     """テスト用に extract.py を実行するヘルパー関数"""
     if db_path.exists():
         db_path.unlink() # 既存のテストDBを削除
     
-    cmd = [sys.executable, str(EXTRACT_PY_PATH), str(pdf_path), "--db_path", str(db_path)]
+    # Pro 依存が無い場合はスキップ
+    if edition == "pro" and not _is_pro_available():
+        pytest.skip("AdvancedExtractor の依存ライブラリが無く Pro テストをスキップします。")
+
+    cmd = [sys.executable, str(EXTRACT_PY_PATH), str(pdf_path), "--db_path", str(db_path), "--edition", edition]
     if patent_mode:
         cmd.append("--patent")
+    if edition == "pro" and force_ocr:
+        cmd.append("--force_ocr")
         
     print(f"Running command: {' '.join(cmd)}") # デバッグ用にコマンドを表示
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding='utf-8')
     
     # extract.py の出力を常に表示する
-    print(f"extract.py stdout:\\n{result.stdout}")
-    print(f"extract.py stderr:\\n{result.stderr}")
+    print(f"extract.py stdout:\n{result.stdout}")
+    print(f"extract.py stderr:\n{result.stderr}")
     
     assert result.returncode == 0, f"extract.py failed for {pdf_path} with code {result.returncode}"
 
@@ -81,29 +113,143 @@ def get_paragraphs_from_db(db_path: Path, doc_id_like: str) -> list[dict]:
         print(f"[get_paragraphs_from_db] Rows found with doc_id_like '{doc_id_like}': {len(results)}")
     return results
 
-# --- Test Cases ---
+def get_concatenated_text_from_db(db_path: Path, doc_id: str, page_num: Optional[int] = None) -> str:
+    paragraphs_text = []
+    with sqlite3.connect(db_path) as con:
+        con.row_factory = sqlite3.Row
+        if page_num:
+            cur = con.execute("SELECT text FROM docs WHERE doc_id = ? AND page = ? ORDER BY paragraph_num ASC", (doc_id, page_num))
+        else:
+            cur = con.execute("SELECT text FROM docs WHERE doc_id = ? ORDER BY page ASC, paragraph_num ASC", (doc_id,))
+        for row in cur:
+            paragraphs_text.append(row["text"])
+    return "\n".join(paragraphs_text)
 
-def test_placeholder_extraction():
+def _normalize_text_for_comparison(text: str) -> str:
+    """PDF抽出とGround Truthの揺らぎを吸収するための正規化処理"""
+    # 改行を空白に変換し、まとめて空白縮約を行う
+    text = text.replace("\n", " ")
+    # 連続する空白を1つに
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+# PDFファイルパスをここで定義
+PDF_SINGLE_COLUMN = SAMPLE_PDF_DIR / "01_single-column_basic-layout_1.pdf"
+GT_SINGLE_COLUMN = GROUND_TRUTH_DIR / "01_single-column_basic-layout_1.txt"
+
+PDF_MULTI_COLUMN = SAMPLE_PDF_DIR / "02_multi-column_2.pdf"
+GT_MULTI_COLUMN = GROUND_TRUTH_DIR / "02_multi-column_2.txt"
+
+PDF_VERTICAL_TEXT = SAMPLE_PDF_DIR / "03_vertical-text_novel-format_1.pdf"
+GT_VERTICAL_TEXT = GROUND_TRUTH_DIR / "03_vertical-text_novel-format_1.txt"
+
+def _run_accuracy_test(
+    request: pytest.FixtureRequest,
+    pdf_path: Path,
+    ground_truth_path: Path,
+    expected_similarity: float = 0.85,
+    edition: str = "free",
+):
+    """抽出精度テストの共通ロジック (requestフィクスチャを追加)
+    
+    注意: この関数内で user_properties をクリアすると、同じテスト関数内で parametrize された
+    複数のケースがある場合に問題が生じる可能性があるため、クリア処理は削除。
+    conftest.py 側で item ごとに user_properties が独立していることを期待する。
+    あるいは、各テストケースの開始時にpytest側で初期化される。
     """
-    tests/sample_pdfs ディレクトリ内の最初のPDFファイルに対して、
-    extract.py がエラーなく実行できることを確認する基本的なテスト。
-    具体的な内容は今後追加していく。
+    doc_id = pdf_path.stem
+
+    print(f"\n=== テスト開始: {pdf_path.name} === ")
+    run_extract_for_test(pdf_path, TEST_DB_PATH, edition=edition)
+    assert TEST_DB_PATH.exists(), "テスト用データベースが作成されていません。"
+    extracted_text = get_concatenated_text_from_db(TEST_DB_PATH, doc_id)
+    with open(ground_truth_path, "r", encoding="utf-8") as f:
+        expected_text = f.read()
+    
+    extracted_text_stripped = _normalize_text_for_comparison(extracted_text)
+    expected_text_stripped = _normalize_text_for_comparison(expected_text)
+    
+    similarity_ratio = difflib.SequenceMatcher(None, extracted_text_stripped, expected_text_stripped).ratio()
+
+    # 結果を user_properties に保存 (リストに追加する形)
+    # 既存のuser_propertiesを壊さないように注意 (通常はpytestがitemごとに管理)
+    if not hasattr(request.node, "user_properties"): # pytest < 6.0 の場合など稀なケース対策
+        request.node.user_properties = []
+    request.node.user_properties.append(("pdf_name", pdf_path.name))
+    request.node.user_properties.append(("similarity", similarity_ratio))
+    # request.node.user_properties.append(("method_info", "unknown_temp")) # 将来的に
+
+    print(f"\n=== 抽出結果 ({pdf_path.name}) ===")
+    print(f"抽出テキスト（最初の500文字）:\n{extracted_text_stripped[:500]}...")
+    print(f"\n=== 期待値 === ")
+    print(f"期待テキスト（最初の500文字）:\n{expected_text_stripped[:500]}...")
+    print(f"類似度: {similarity_ratio:.4f} ({similarity_ratio*100:.2f}%)")
+    
+    if similarity_ratio < expected_similarity:
+        print("\n=== 差分（期待値 vs 抽出結果）===")
+        diff = difflib.unified_diff(
+            expected_text_stripped.splitlines(keepends=True),
+            extracted_text_stripped.splitlines(keepends=True),
+            fromfile='expected_text',
+            tofile='extracted_text',
+            lineterm='\n'
+        )
+        for line in diff:
+            print(line, end="")
+        print("\n=== 差分終了 ===")
+        
+    assert similarity_ratio >= expected_similarity, f"{pdf_path.name} の抽出精度が期待値を下回っています ({similarity_ratio:.4f} < {expected_similarity})"
+    print(f"\n=== テスト完了: {pdf_path.name} ===\n")
+
+
+@pytest.mark.single_column
+@pytest.mark.parametrize("edition", ["free", pytest.param("pro", marks=pytest.mark.pro)])
+def test_single_column_accuracy(request: pytest.FixtureRequest, edition):
+    """基本的な1カラムPDFの抽出精度をテスト"""
+    assert PDF_SINGLE_COLUMN.exists(), f"{PDF_SINGLE_COLUMN} が見つかりません。"
+    assert GT_SINGLE_COLUMN.exists(), f"{GT_SINGLE_COLUMN} が見つかりません。"
+    expected_sim = 0.95 # ProもFreeも同じ期待値
+    _run_accuracy_test(
+        request,
+        PDF_SINGLE_COLUMN,
+        GT_SINGLE_COLUMN,
+        expected_similarity=expected_sim,
+        edition=edition,
+    )
+
+@pytest.mark.multi_column
+@pytest.mark.parametrize("edition", ["free", pytest.param("pro", marks=pytest.mark.pro)])
+def test_multi_column_accuracy(request: pytest.FixtureRequest, edition):
+    """2カラムPDFの抽出精度をテスト"""
+    assert PDF_MULTI_COLUMN.exists(), f"{PDF_MULTI_COLUMN} が見つかりません。"
+    assert GT_MULTI_COLUMN.exists(), f"{GT_MULTI_COLUMN} が見つかりません。"
+    expected_sim = 0.70 if edition == "pro" else 0.65
+    _run_accuracy_test(request, PDF_MULTI_COLUMN, GT_MULTI_COLUMN, expected_similarity=expected_sim, edition=edition)
+
+@pytest.mark.vertical_text
+@pytest.mark.parametrize("edition", ["free", pytest.param("pro", marks=pytest.mark.pro)])
+def test_vertical_text_accuracy(request: pytest.FixtureRequest, edition):
+    """縦書きPDFの抽出精度をテスト"""
+    assert PDF_VERTICAL_TEXT.exists(), f"{PDF_VERTICAL_TEXT} が見つかりません。"
+    assert GT_VERTICAL_TEXT.exists(), f"{GT_VERTICAL_TEXT} が見つかりません。"
+    expected_sim = 0.30 if edition == "pro" else 0.03
+    _run_accuracy_test(request, PDF_VERTICAL_TEXT, GT_VERTICAL_TEXT, expected_similarity=expected_sim, edition=edition)
+
+def test_basic_extraction_and_db_save(request: pytest.FixtureRequest):
     """
+    最も基本的なPDFに対して extract.py がエラーなく実行でき、
+    DBに段落が保存されることを確認する。
+    このテストは類似度を記録しないので、user_propertiesへの追加は行わない。
+    """
+    target_pdf = PDF_SINGLE_COLUMN
+    assert target_pdf.exists(), f"テスト用のPDFファイル {target_pdf} が見つかりません。"
     
-    pdf_files = list(SAMPLE_PDF_DIR.glob("*.pdf"))
-    assert pdf_files, "テスト用のPDFファイルが tests/sample_pdfs に見つかりません。"
+    print(f"Testing basic extraction with PDF: {target_pdf.name}")
+    run_extract_for_test(target_pdf, TEST_DB_PATH, edition="free")
     
-    target_pdf = pdf_files[0] # 最初のPDFファイルを選択
-    
-    print(f"Testing with PDF: {target_pdf.name}")
-    run_extract_for_test(target_pdf, TEST_DB_PATH)
-    
-    # ここでは extract.py が正常終了したことのみを確認
-    # 今後、DBの内容を検証するアサーションを追加
     assert TEST_DB_PATH.exists(), "テスト用データベースが作成されていません。"
 
-    # 簡単なDB内容チェック (例: docsテーブルから何か取得できるか)
-    paragraphs = get_paragraphs_from_db(TEST_DB_PATH, target_pdf.stem) # PDFのファイル名(拡張子なし)で検索
+    paragraphs = get_paragraphs_from_db(TEST_DB_PATH, target_pdf.stem)
     assert len(paragraphs) > 0, f"{target_pdf.name} から段落が抽出され、DBに保存されていません。"
     
     print(f"Successfully extracted {len(paragraphs)} paragraphs from {target_pdf.name}") 

@@ -1,8 +1,9 @@
 pdfplumber
 pytesseract
-pdf2image
+pdf2image  # Poppler (https://poppler.freedesktop.org/) のインストールが別途必要です。
 python-dotenv
 PyYAML
-# numpy
+numpy
+opencv-python-headless
 # pytest
 watchdog 

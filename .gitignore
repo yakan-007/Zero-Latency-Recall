@@ -131,8 +131,13 @@ test_zlr.sqlite
 test_zlr.sqlite-journal
 
 # Main database (if not intended to be version-controlled)
-# zlr.sqlite
-# zlr.sqlite-journal
+zlr.sqlite
+zlr.sqlite-journal
+
+# Sample PDFs and Test PDFs
+sample/**/*.pdf
+samples/**/*.pdf
+tests/sample_pdfs/**/*.pdf
 
 # Configuration files that might contain secrets (if not using a template)
 # config.py 
