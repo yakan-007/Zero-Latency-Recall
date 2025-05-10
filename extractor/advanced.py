@@ -174,4 +174,19 @@ class AdvancedExtractor(BaseExtractor):
             return "\n".join(lines).strip()
         except Exception as e:
             logger.exception(f"Page {page_idx} block {blk_idx}: PaddleOCR error caught")
+            # --- フォールバック: pytesseract ---
+            try:
+                import pytesseract
+                logger.info(
+                    f"Page {page_idx} block {blk_idx}: PaddleOCR 失敗のため pytesseract にフォールバックします。"
+                )
+                # pytesseract は PIL.Image を直接受け取れる
+                txt = pytesseract.image_to_string(image, lang="jpn")
+                txt = txt.strip()
+                if txt:
+                    return txt
+            except Exception as fallback_e:  # noqa: BLE001
+                logger.warning(
+                    f"Page {page_idx} block {blk_idx}: pytesseract フォールバックも失敗: {fallback_e}"
+                )
             return None 
