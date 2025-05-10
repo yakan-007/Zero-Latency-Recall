@@ -171,7 +171,8 @@ class AdvancedExtractor(BaseExtractor):
                 logger.debug(f"Page {page_idx} block {blk_idx}: PaddleOCR returned no result")
                 return None
             lines = [r[1][0] for res_block in result for r in res_block]
-            if not lines:  # 取得行が空の場合、縦書きの可能性を考慮して90/270度回転を試す
+            if not lines and self._is_likely_vertical_text(image):
+                # 取得行が空 && 縦書きらしい場合、90/270度回転を試す
                 for rot in (90, 270):
                     try:
                         rotated = image.rotate(rot, expand=True)
@@ -195,16 +196,54 @@ class AdvancedExtractor(BaseExtractor):
                 logger.info(
                     f"Page {page_idx} block {blk_idx}: PaddleOCR 失敗のため pytesseract にフォールバックします。"
                 )
-                # まず jpn_vert (縦書き) を優先し、失敗したら通常モデル
-                try:
-                    txt = pytesseract.image_to_string(image, lang="jpn_vert")
-                except pytesseract.TesseractError:
-                    txt = pytesseract.image_to_string(image, lang="jpn")
-                txt = txt.strip()
-                if txt:
-                    return txt
+                # PSM × 言語 (jpn_vert / jpn) を複数試し、CJK文字数が最大の候補を採用
+                def _cjk_count(s: str) -> int:
+                    return sum(
+                        1 for ch in s if (
+                            "\u4E00" <= ch <= "\u9FFF"  # CJK
+                            or "\u3040" <= ch <= "\u30FF"  # Hiragana/Katakana
+                        )
+                    )
+
+                candidates: list[str] = []
+                for lang in ("jpn_vert", "jpn"):
+                    for psm in (5, 6):
+                        try:
+                            cfg = f"--psm {psm} --dpi 300"
+                            t = pytesseract.image_to_string(image, lang=lang, config=cfg)
+                            t = t.strip()
+                            if t:
+                                candidates.append(t)
+                        except pytesseract.TesseractError:  # noqa: PERF203
+                            continue
+
+                if candidates:
+                    best_txt = max(candidates, key=_cjk_count)
+                    if best_txt:
+                        return best_txt
             except Exception as fallback_e:  # noqa: BLE001
                 logger.warning(
                     f"Page {page_idx} block {blk_idx}: pytesseract フォールバックも失敗: {fallback_e}"
                 )
             return None 
+
+    # ---------------------------------------------
+    # 縦書き判定ユーティリティ
+    # ---------------------------------------------
+
+    @staticmethod
+    def _is_likely_vertical_text(image) -> bool:  # type: ignore[override]
+        """簡易縦書き判定 (pytesseract の OSD + 横長ページ判定)"""
+        try:
+            import pytesseract, re  # noqa: WPS433
+
+            osd = pytesseract.image_to_osd(image, lang="jpn", config="--dpi 300")  # type: ignore[arg-type]
+            match = re.search(r"Orientation in degrees:\s*(\d+)", osd)
+            if match and int(match.group(1)) in (90, 270):
+                return True
+        except Exception:
+            # OSD が使えない / エラー時は fallback 判定
+            pass
+
+        # 横長 (landscape) かつ高さより幅が 1.2 倍以上なら縦書きの可能性とみなす
+        return image.width > image.height * 1.2 
