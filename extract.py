@@ -1,4 +1,4 @@
-print("EXTRACT.PY SCRIPT STARTED") # Test print
+print("DEBUG: extract.py top of file execution")
 # デバッグ: スクリプト開始直後のcv2とnumpyのインポート状況を確認
 IMPORTS_OK = True
 try:
@@ -21,19 +21,48 @@ sys.stdout.flush()
 import re
 import sqlite3
 import logging # logging モジュールをインポート
-import sys # 標準出力フラッシュ用
 from typing import List, Tuple, Optional, Dict
 import pdfplumber
-from pdfplumber.utils import extract_text as pdfplumber_extract_text # 例外処理のため明示的にインポートする場合 (今回は利用しない)
-from pdfplumber.pdf import PDF # 型ヒント用
-from pdfplumber.page import Page # 型ヒント用
+from pdfplumber.utils import extract_text as pdfplumber_extract_text
+from pdfplumber.pdf import PDF
+from pdfplumber.page import Page
 from pathlib import Path
+
+# ロギング設定 (これを先に確定)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logging.getLogger("pdfminer").setLevel(logging.WARNING)
+logging.getLogger("pdfplumber").setLevel(logging.WARNING)
+
+print("ロギング設定完了、スクリプト開始") # Logging is now configured
+sys.stdout.flush()
+
+# PyMuPDF (fitz) のインポート試行とフラグ設定 (logging.basicConfig の後)
+_FITZ_AVAILABLE = False # Default to False
+try:
+    import fitz  # type: ignore
+    logging.debug("PyMuPDF (fitz) imported successfully for general use globally.")
+    _FITZ_AVAILABLE = True
+except ImportError:
+    logging.warning("PyMuPDF (fitz) not found globally. Fitz-dependent functions will not be available.")
+    # _FITZ_AVAILABLE remains False
+except Exception as e:
+    logging.error(f"An unexpected error occurred during fitz import: {e}")
+    # _FITZ_AVAILABLE remains False
+
+logging.debug(f"_FITZ_AVAILABLE set to: {_FITZ_AVAILABLE} at global scope")
+
 # config.py が存在しない場合に備えてフォールバック定義
 try:
     from config import DB_PATH  # type: ignore
 except ModuleNotFoundError:
     DB_PATH = Path("zlr.sqlite")  # テスト用フォールバックパス
-    logging.warning("config.py が見つからないため、DB_PATH をデフォルト 'zlr.sqlite' に設定します。")
+    logging.warning("config.py が見つからないため、DB_PATH をデフォルト 'zlr.sqlite' に設定します。") # logging đã được cấu hình
 import argparse # argparse をインポート
 from tag_utils import load_tags
 import textwrap
@@ -42,26 +71,6 @@ import textwrap
 import pytesseract
 from pdf2image import convert_from_path
 from pdf2image.exceptions import PDFPageCountError, PDFSyntaxError as PDF2ImageSyntaxError, PDFInfoNotInstalledError # pdf2image の例外
-
-# ロギング設定
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # 明示的に標準出力に設定
-    ]
-)
-
-# Suppress verbose logs from pdfminer which pdfplumber uses internally
-logging.getLogger("pdfminer").setLevel(logging.WARNING)
-
-# pdfplumberのロガーレベルを調整（多くのデバッグメッセージを抑制）
-pdfplumber_logger = logging.getLogger("pdfplumber")
-pdfplumber_logger.setLevel(logging.WARNING)  # WARNINGレベル以上のみ表示
-
-# 標準出力をフラッシュして確実に表示
-print("ロギング設定完了、スクリプト開始")
-sys.stdout.flush()
 
 # --- 定数 ---
 MIN_LEN, MAX_LEN = 5, 6000  # 段落の文字長フィルタ (長文も許可)
@@ -154,7 +163,7 @@ def _is_likely_multicolumn(page: Page, central_band_ratio: float = 0.15, min_wor
         is_multicolumn = False
     else:
         min_side_words = min_words_for_check * 0.1 
-        center_sparsity_threshold = 0.3 
+        center_sparsity_threshold = 0.65 # 0.55 から 0.65 へ変更
         sides_are_populated = words_left_of_band > min_side_words and words_right_of_band > min_side_words
 
         if sides_are_populated:
@@ -203,6 +212,19 @@ def _extract_text_with_pdfplumber(page: Page, patent_mode: bool = False) -> Tupl
             chosen_method_info = "patent_layout_true_fallback_false" if text else "patent_layout_false"
             text_to_return = text
         else:
+            # --- ① 事前: マルチカラム高速検出 + PyMuPDF 抽出 -----------------------------
+            # ページを軽量判定し、2段以上と見做されたらまず PyMuPDF ベースの抽出を試す。
+            # 十分な長さ (>200 文字) が得られた場合は、後続の pdfplumber パラメータ総当たりを
+            # スキップして早期リターンし、速度低下を防ぐ。
+            is_multi_fast = _is_likely_multicolumn(page, central_band_ratio=0.25)
+            if is_multi_fast:
+                fast_fitz_text = _safe_multicol_fitz(page)
+                if fast_fitz_text and len(fast_fitz_text) > 200:
+                    logging.info(
+                        f"[{pdf_filename} - Page {page.page_number}] multicolumn_fitz_fast selected (len={len(fast_fitz_text)}). Skipping pdfplumber sweep."
+                    )
+                    return fast_fitz_text.strip(), "multicolumn_fitz_fast"
+
             param_sets = [
                 (True, 1, 1),   # layout=True, x_tolerance=1, y_tolerance=1 (v4に近いが少し許容度低め)
                 (False, 3, 3),
@@ -247,35 +269,41 @@ def _extract_text_with_pdfplumber(page: Page, patent_mode: bool = False) -> Tupl
                 multicol_text: str | None = None
                 multicol_method: str = ""
 
-                # fitz → v4 → v3 → v2 → simple
-                multicol_fitz = _safe_multicol_fitz(page)
-                if multicol_fitz:
-                    multicol_text = multicol_fitz
-                    multicol_method = "multicolumn_fitz"
+                # fitz を最優先で試行
+                fitz_text = _safe_multicol_fitz(page)
+                if fitz_text and _better_multicol_text(fitz_text, text_to_return, rel_margin=0.02):
+                    logging.debug(
+                        f"[{pdf_filename} - Page {page.page_number}] multicolumn_fitz is better. Using it."
+                    )
+                    text_to_return = fitz_text
+                    chosen_method_info = "multicolumn_fitz"
                 else:
+                    # fitz が不採用または結果なしの場合、他のマルチカラム処理を試す
+                    logging.debug(
+                        f"[{pdf_filename} - Page {page.page_number}] multicolumn_fitz not better or no result. Trying other multicolumn methods."
+                    )
+                    # 既存の v4 -> v3 -> v2 -> simple の順で試す
                     multicol_v4 = _safe_multicol_v4(page)
-                    if multicol_v4:
+                    if multicol_v4 and _better_multicol_text(multicol_v4, text_to_return, rel_margin=0.02):
                         multicol_text = multicol_v4
                         multicol_method = "multicolumn_v4"
                     else:
                         multicol_v3 = _safe_multicol_v3(page)
-                        if multicol_v3:
+                        if multicol_v3 and _better_multicol_text(multicol_v3, text_to_return, rel_margin=0.02):
                             multicol_text = multicol_v3
                             multicol_method = "multicolumn_v3"
                         else:
                             multicol_v2 = _extract_text_multicolumn_v2(page)
-                            if multicol_v2:
+                            if multicol_v2 and _better_multicol_text(multicol_v2, text_to_return, rel_margin=0.02):
                                 multicol_text = multicol_v2
                                 multicol_method = "multicolumn_v2"
                             else:
                                 multicol_simple = _extract_text_multicolumn(page)
-                                if multicol_simple:
+                                if multicol_simple and _better_multicol_text(multicol_simple, text_to_return, rel_margin=0.02):
                                     multicol_text = multicol_simple
                                     multicol_method = "multicolumn_simple"
 
-                if multicol_text:
-                    # 改良版判定ロジック: _better_multicol_text を使用
-                    if multicol_text and _better_multicol_text(multicol_text, text_to_return, rel_margin=0.02):
+                    if multicol_text: # v4,v3,v2,simple のいずれかが採用された場合
                         logging.debug(
                             f"[{pdf_filename} - Page {page.page_number}] {multicol_method} better than params by >2% (effective). Using {multicol_method}."
                         )
@@ -283,14 +311,17 @@ def _extract_text_with_pdfplumber(page: Page, patent_mode: bool = False) -> Tupl
                         chosen_method_info = multicol_method
                     else:
                         logging.debug(
-                            f"[{pdf_filename} - Page {page.page_number}] {multicol_method} not better than params based on effective length/words. Keeping params:({chosen_method_info})."
+                            f"[{pdf_filename} - Page {page.page_number}] No other multicolumn extractor produced a better result. Keeping params:({chosen_method_info})."
                         )
-                else:
-                    logging.debug(
-                        f"[{pdf_filename} - Page {page.page_number}] Both multicolumn extractors produced no text. Keeping params:({chosen_method_info})."
-                    )
-            else:
-                logging.info(f"[{pdf_filename} - Page {page.page_number}] Not detected as multicolumn. Using best of param_sets:({chosen_method_info}).")
+
+            # --- 先行フィッツ試行: マルチカラム判定の有無に関係なく PyMuPDF ベースの抽出を試す ---
+            pre_fitz_text = _safe_multicol_fitz(page)
+            if pre_fitz_text and _better_multicol_text(pre_fitz_text, text_to_return, rel_margin=0.02):
+                logging.debug(
+                    f"[{pdf_filename} - Page {page.page_number}] preemptive multicolumn_fitz is better (len={len(pre_fitz_text)} vs {len(text_to_return or '')}). Adopting it."
+                )
+                text_to_return = pre_fitz_text
+                chosen_method_info = "multicolumn_fitz_preemptive"
 
             logging.info( # Changed to INFO to make it more visible
                 f"[{pdf_filename} - Page {page.page_number}] Final choice: Method='{chosen_method_info}', Length={len(text_to_return or ''),}, (WasLikelyMulticolumn={is_multi_col_page})"
@@ -678,8 +709,12 @@ def _better_multicol_text(candidate: str, baseline: str | None, rel_margin: floa
     dup_c = eff_c / wc_c
     dup_b = eff_b / wc_b
 
-    # baseline の重複度が candidate の 10% 以上大きいなら candidate
-    return dup_b > dup_c * 1.10
+    # baseline の重複度が candidate の 10% 以上大きい かつ
+    # 文字長が baseline の 85% 以上である場合のみ candidate を採用。
+    if dup_b > dup_c * 1.10 and eff_c >= eff_b * 0.85:
+        return True
+
+    return False
 
 def _extract_text_multicolumn_v3(page: Page) -> Optional[str]:
     """行レベルで境界を推定する改良版 2〜3段組抽出
@@ -862,11 +897,14 @@ def _safe_multicol_v4(page: Page) -> Optional[str]:
 
 # 新規: PyMuPDF 版の安全ラッパ
 def _safe_multicol_fitz(page: Page) -> Optional[str]:
+    logging.debug(f"In _safe_multicol_fitz, _FITZ_AVAILABLE is: {_FITZ_AVAILABLE}") # ★関数呼び出し時のフラグ値確認
+    if not _FITZ_AVAILABLE:
+        return None
     try:
         return _extract_text_multicolumn_fitz(page)
     except Exception as e:
         logging.debug(
-            f"[{Path(page.pdf.stream.name).name} - Page {page.page_number}] _extract_text_multicolumn_fitz exception: {e}"
+            f"[{Path(page.pdf.stream.name).name} - Page {page.page_number}] _extract_text_multicolumn_fitz exception: {e}", exc_info=True
         )
         return None
 
@@ -874,237 +912,238 @@ def _safe_multicol_fitz(page: Page) -> Optional[str]:
 # 追加: PyMuPDF ベースのカラム抽出 (fitz)
 # -------------------------------------------------
 
-try:
-    import fitz  # type: ignore
+# try...except ImportError...else ブロックは削除し、関数定義を直接記述する
+# （_FITZ_AVAILABLE フラグで事前チェックするため）
 
-    def _extract_text_multicolumn_fitz(page: Page) -> Optional[str]:
-        """PyMuPDF (fitz) を使用して、テキストブロックをベースに複数カラムのテキストを抽出する。
+def _extract_text_multicolumn_fitz(page: Page) -> Optional[str]:
+    """PyMuPDF (fitz) を使用して、テキストブロックをベースに複数カラムのテキストを抽出する。
 
-        1. page.get_text("blocks") からテキストブロックとそのBBoxを取得。
-        2. ブロックのX座標 (x0, x1) を分析し、カラム境界を推定する。
-           - すべてのブロックのx0とx1を収集しソート。
-           - 隣り合うX座標間の大きなギャップをカラム境界とする。
-           - これによりカラム数を動的に決定（1, 2, 3... カラム）。
-        3. 各ブロックがどのカラムに属するかを判定。
-        4. 各カラム内でブロックをY座標 (y0) でソート。
-        5. カラムを左から右へ、各カラム内のブロックを上から下へ結合してテキストを再構成する。
-        """
-        pdf_path = Path(page.pdf.stream.name)
-        doc_page_num = page.page_number -1 # 0-indexed
-        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] Entering _extract_text_multicolumn_fitz")
-
-        try:
-            doc = fitz.open(pdf_path)
-            p = doc[doc_page_num]
-            page_width = p.rect.width
-            page_height = p.rect.height
-            blocks = p.get_text("blocks", sort=True) # y-sorted blocks
-            doc.close()
-            logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Found {len(blocks)} blocks initially. Page WxH: {page_width:.2f}x{page_height:.2f}")
-            # logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Raw blocks: {blocks}") # 詳細すぎるので通常はコメントアウト
-        except Exception as e:
-            logging.error(f"[{pdf_path.name} - Page {page.page_number}] fitz open or get_text error: {e}", exc_info=True)
-            return None
-
-        if not blocks:
-            logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: No blocks found after get_text.")
-            return None
-
-        # --- 1. カラム境界の推定 ---
-        block_properties = [{'text': b[4], 'x0': b[0], 'y0': b[1], 'x1': b[2], 'y1': b[3], 'block_no': b[5]} for b in blocks]
-        # logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Processed {len(block_properties)} block_properties. Example: {block_properties[:2] if block_properties else 'N/A'}")
-        
-        # テキストが空のブロックもレイアウト情報として意味を持つことがあるため、ここではフィルタしない。
-        # ただし、完全に空（スペースのみなど）のブロックが多いとノイズになる可能性はある。
-
-        if not block_properties:
-            logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: No block_properties after initial processing.")
-            return None
-        
-        x_boundaries = set()
-        for b_idx, b_prop in enumerate(block_properties):
-            # logging.debug(f"  Block {b_idx}: x0={b_prop['x0']:.2f}, x1={b_prop['x1']:.2f}, text='{b_prop['text'][:20].strip()}...'")
-            x_boundaries.add(b_prop['x0'])
-            x_boundaries.add(b_prop['x1'])
-        
-        sorted_x = sorted(list(x_boundaries))
-        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Sorted X boundaries ({len(sorted_x)}): {sorted_x}")
-        
-        potential_gutters = []
-        if len(sorted_x) > 1:
-            for i in range(len(sorted_x) - 1):
-                gap_start = sorted_x[i]
-                gap_end = sorted_x[i+1]
-                gap_width = gap_end - gap_start
-                # ギャップ判定の閾値を調整 (より詳細なログ出力のため)
-                min_gap_abs = 5.0 # 最小絶対ギャップ幅
-                min_gap_rel = page_width * 0.01 # 最小相対ギャップ幅 (ページ幅の1%)
-                # logging.debug(f"  Gap candidate: {gap_start:.2f} - {gap_end:.2f} (width: {gap_width:.2f}). Rel_thresh: {min_gap_rel:.2f}")
-                if gap_width > max(min_gap_rel, min_gap_abs):
-                    potential_gutters.append((gap_start, gap_end))
-                    logging.debug(f"    -> Found potential gutter: ({gap_start:.2f}, {gap_end:.2f}), width={gap_width:.2f}")
-
-        if not potential_gutters:
-            logging.info(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: No significant gutters found. Assuming single column based on X-gap analysis.")
-            # ブロックはget_textでyソート済みなので、そのまま結合
-            result_text = "\n".join(b['text'].strip() for b in block_properties if b['text'].strip()).strip()
-            logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Single column text length: {len(result_text)}")
-            return result_text if result_text else None
-
-        column_dividers = sorted(list(set([(g[0] + g[1]) / 2 for g in potential_gutters])))
-        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Initial column dividers ({len(column_dividers)}): {column_dividers}")
-
-        # 近すぎる分割線を除去 (より積極的なマージング)
-        # 例えば、分割線間の距離がページ幅の 5% 未満なら、その間のガターは無視できるかもしれない。
-        # ただし、これにより意図しないカラム結合が起こるリスクもある。
-        # ここでは、分割線が非常に近い場合（例：1pt以内）にのみマージする簡易ロジックを試す。
-        # if len(column_dividers) > 1:
-        #     merged_dividers = []
-        #     current_divider = column_dividers[0]
-        #     for i in range(1, len(column_dividers)):
-        #         if column_dividers[i] - current_divider < 1.0: # 1pt 以内ならマージ対象 (平均を取るなど)
-        #             # current_divider = (current_divider + column_dividers[i]) / 2 # 平均化はしないでおく
-        #             pass # 実質的に後のdividerを無視
-        #         else:
-        #             merged_dividers.append(current_divider)
-        #             current_divider = column_dividers[i]
-        #     merged_dividers.append(current_divider) # 最後のdividerを追加
-        #     if len(merged_dividers) < len(column_dividers):
-        #         logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Merged close dividers to: {merged_dividers}")
-        #         column_dividers = merged_dividers
-
-        num_columns = len(column_dividers) + 1
-        logging.info(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Estimated {num_columns} columns with dividers at {column_dividers}")
-
-        # --- 2. ブロックをカラムに割り当て ---
-        columns_data: List[List[Dict]] = [[] for _ in range(num_columns)]
-        # ブロックのソート順を見直し: Y座標優先、次にX座標。get_text("blocks", sort=True) は既にYソートされているが念のため。
-        current_page_blocks = sorted(block_properties, key=lambda b: (b['y0'], b['x0'])) 
-
-        for block_idx, block in enumerate(current_page_blocks):
-            block_center_x = (block['x0'] + block['x1']) / 2
-            assigned_column = 0
-            for i, divider_x in enumerate(column_dividers):
-                if block_center_x > divider_x:
-                    assigned_column = i + 1
-                else:
-                    break
-            
-            if assigned_column < num_columns:
-                 columns_data[assigned_column].append(block)
-                 # logging.debug(f"  Block {block_idx} (ctr_x={block_center_x:.2f}, y0={block['y0']:.2f}) -> Col {assigned_column}")
-            else: 
-                 logging.warning(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Block {block_idx} (center_x={block_center_x:.2f}) assigned to out-of-bounds column {assigned_column} (max={num_columns-1}). Assigning to last column.")
-                 columns_data[num_columns-1].append(block) 
-        
-        for c_idx, c_data in enumerate(columns_data):
-            logging.debug(f"  Column {c_idx} has {len(c_data)} blocks.")
-            # for b_idx_in_col, b_in_col in enumerate(c_data):
-                # logging.debug(f"    Col {c_idx} Block {b_idx_in_col}: y0={b_in_col['y0']:.2f}, text='{b_in_col['text'][:20].strip()}'")
-
-        # --- 3. 各カラム内でブロックをY座標でソートし、テキストを結合 ---
-        result_text_parts = []
-        for i in range(num_columns):
-            # カラム内のブロックは既にy0でソートされているはず (current_page_blocks のソート順による)
-            # さらに明示的にソートしても良いが、ここでは current_page_blocks のソートを信頼する。
-            # sorted_column_blocks = sorted(columns_data[i], key=lambda b: b['y0']) # 再ソートは不要のはず
-            sorted_column_blocks = columns_data[i] # current_page_blocks が (y0, x0) ソートされているため、カラム内のブロックもy0順になっている
-            
-            column_text_fragments = []
-            last_y1 = -1
-            for blk in sorted_column_blocks:
-                # ブロック間の縦方向の大きなスペースを考慮して改行を追加するロジック（オプション）
-                # current_y0 = blk['y0']
-                # if last_y1 != -1 and (current_y0 - last_y1 > page_height * 0.02): # 例:ページ高さの2%以上空いていたら
-                #    column_text_fragments.append("\n") # 追加の改行
-                # last_y1 = blk['y1']
-                
-                block_text_stripped = blk['text'].strip()
-                if block_text_stripped:
-                    column_text_fragments.append(block_text_stripped)
-
-            column_text = "\n".join(column_text_fragments).strip()
-            if column_text:
-                logging.debug(f"  Column {i} text (len={len(column_text)}): '{column_text[:100].replace('\n', ' ')}...'" )
-                result_text_parts.append(column_text)
-            else:
-                logging.debug(f"  Column {i} produced no text after stripping/joining.")
-        
-        final_text = "\n\n".join(result_text_parts).strip() # カラム間は2つの改行で区切る
-
-        logging.info(
-            f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Extracted. Columns={num_columns}, Final text length={len(final_text)}"
-        )
-        # logging.debug(f"[{pdf_path.name} - Page {page.page_number}] fitz_blocks: Final text preview: '{final_text[:200].replace('\n', ' ')}'")
-        return final_text if final_text else None
-
-except ImportError:
-
-    def _extract_text_multicolumn_fitz(page: Page) -> Optional[str]:
-        # PyMuPDF が無い場合はスキップ
-        return None
-
-# -------------------------------------------------
-#  縦書き判定 & 抽出ユーティリティ
-# -------------------------------------------------
-
-def _is_likely_vertical_text(page: Page, sample_size: int = 200) -> bool:
-    """ページが縦書きレイアウトである可能性を簡易判定する。
-
-    ヒューリスティック:
-    1. `extract_words` で取得した word の bbox を利用。
-    2. 幅 (x1-x0) より高さ (bottom-top) が明らかに大きい word が多い場合を縦書きとみなす。
-       ※回転 PDF など例外もあるため、ページメタ情報の `/Rotate` までは見ない簡易版。
+    1. page.get_text("blocks") からテキストブロックとそのBBoxを取得。
+    2. ブロックのX座標 (x0, x1) を分析し、カラム境界を推定する。
+       - すべてのブロックのx0とx1を収集しソート。
+       - 隣り合うX座標間の大きなギャップをカラム境界とする。
+       - これによりカラム数を動的に決定（1, 2, 3... カラム）。
+    3. 各ブロックがどのカラムに属するかを判定。
+    4. 各カラム内でブロックをY座標 (y0) でソート。
+    5. カラムを左から右へ、各カラム内のブロックを上から下へ結合してテキストを再構成する。
     """
+    if not _FITZ_AVAILABLE:
+        logging.warning(f"[{Path(page.pdf.stream.name).name} - Page {page.page_number}] _extract_text_multicolumn_fitz called but fitz is not available.")
+        return None
+    pdf_path = Path(page.pdf.stream.name)
+    doc_page_num = page.page_number -1 # 0-indexed
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Entering _extract_text_multicolumn_fitz. PDF path: {pdf_path.resolve()}")
 
     try:
-        words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
-    except Exception:
-        return False
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Attempting to open with fitz: {pdf_path}")
+        doc = fitz.open(pdf_path)
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Fitz doc opened. Attempting to load page {doc_page_num}...")
+        p = doc[doc_page_num]
+        page_width = p.rect.width
+        page_height = p.rect.height
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Fitz page loaded. Page WxH: {page_width:.2f}x{page_height:.2f}. Attempting to get text blocks...")
+        blocks = p.get_text("blocks", sort=True) # y-sorted blocks
+        doc.close()
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Initial {len(blocks)} blocks from get_text(\"blocks\", sort=True):")
+        for b_idx, b_raw in enumerate(blocks):
+            logging.debug(f"  FITZ_DEBUG: Raw Block {b_idx}: x0={b_raw[0]:.2f}, y0={b_raw[1]:.2f}, x1={b_raw[2]:.2f}, y1={b_raw[3]:.2f}, text='{b_raw[4][:30].replace('\\n', ' ')}...'")
 
-    if not words:
-        return False
-
-    sample = words[:sample_size]
-    vert_like = 0
-    for w in sample:
-        w_width = w["x1"] - w["x0"]
-        w_height = w["bottom"] - w["top"]
-        if w_height == 0:
-            continue
-        if w_height / max(w_width, 1) > 1.8:  # 高さが幅の1.8倍以上 → 縦長
-            vert_like += 1
-
-    return vert_like >= len(sample) * 0.3  # 30% 以上縦長なら縦書きと判断 (閾値緩和)
-
-def _extract_text_vertical_pdfplumber(page: Page) -> Optional[str]:
-    """pdfplumber の writing_mode='vertical' を用いた縦書きテキスト抽出"""
-    try:
-        txt = page.extract_text(layout=True, writing_mode="vertical", x_tolerance=3, y_tolerance=3)
-    except Exception:
+    except Exception as e:
+        logging.error(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: fitz open or get_text error: {e}", exc_info=True)
         return None
 
-    return txt.strip() if txt else None
+    if not blocks:
+        logging.warning(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: No blocks found after get_text. Returning None.")
+        return None
 
-# 不正な (cid:123) のようなグリフ参照を取り除くヘルパ
-_re_cid = re.compile(r"\\(cid:\\d+\\)")
-# CJK 文字判定用の正規表現 (縦書き品質チェックなどで利用)
-_re_cjk = re.compile(r"[\\u3000-\\u9fff]")
-# ひらがなのみで構成される1-4文字の行にマッチする正規表現 (ルビ除去用)
-_re_short_hiragana_line = re.compile(r"^[ぁ-ゞ]{1,4}$")
-
-def _remove_cid_artifacts(text: str) -> str:
-    """pdfplumber が Unicode マッピングに失敗した際に現れる (cid:123) 等を除去"""
-    return _re_cid.sub("", text)
-
-def _remove_short_hiragana_lines(text: str | None) -> str | None:
-    """テキストから、ひらがなのみで構成される短い行（ルビと想定）を除去する。"""
-    if not text:
+    # --- 1. カラム境界の推定 ---
+    block_properties = [{'text': b[4], 'x0': b[0], 'y0': b[1], 'x1': b[2], 'y1': b[3], 'block_no': b[5]} for b in blocks]
+    
+    if not block_properties:
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: No block_properties after initial processing.")
         return None
     
-    lines = text.splitlines()
-    cleaned_lines = [line for line in lines if not _re_short_hiragana_line.fullmatch(line.strip())]
-    return "\n".join(cleaned_lines)
+    x_boundaries = set()
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Processing {len(block_properties)} block_properties for X boundaries:")
+    for b_idx, b_prop in enumerate(block_properties):
+        logging.debug(f"  FITZ_DEBUG: BlockProp {b_idx}: x0={b_prop['x0']:.2f}, x1={b_prop['x1']:.2f}, text='{b_prop['text'][:30].replace('\\n', ' ')}...'")
+        x_boundaries.add(b_prop['x0'])
+        x_boundaries.add(b_prop['x1'])
+    
+    sorted_x = sorted(list(x_boundaries))
+    sorted_x_str = ", ".join([f"{x:.2f}" for x in sorted_x])
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Sorted unique X boundaries ({len(sorted_x)}): [{sorted_x_str}]")
+    
+    potential_gutters = []
+    if len(sorted_x) > 1:
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Identifying potential gutters...")
+        for i in range(len(sorted_x) - 1):
+            gap_start = sorted_x[i]
+            gap_end = sorted_x[i+1]
+            gap_width = gap_end - gap_start
+            min_gap_abs = 5.0 
+            min_gap_rel = page_width * 0.01 
+            logging.debug(f"  FITZ_DEBUG: Gap candidate: {gap_start:.2f} - {gap_end:.2f} (width: {gap_width:.2f}). MinAbs: {min_gap_abs:.2f}, MinRel (1% of pgW): {min_gap_rel:.2f}")
+            if gap_width > max(min_gap_rel, min_gap_abs):
+                potential_gutters.append((gap_start, gap_end))
+                logging.debug(f"    FITZ_DEBUG: -> Found potential gutter: ({gap_start:.2f}, {gap_end:.2f}), width={gap_width:.2f}")
+
+    if not potential_gutters:
+        logging.info(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: No significant gutters found. Assuming single column.")
+        result_text = "\\n".join(b['text'].strip() for b in block_properties if b['text'].strip()).strip()
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Single column text (len {len(result_text)}): '{result_text[:100].replace('\\n', ' ')}...'")
+        return result_text if result_text else None
+
+    potential_gutters.sort(key=lambda g: (g[1] - g[0]), reverse=True)
+    potential_gutters_str = ", ".join([f"({g[0]:.2f}-{g[1]:.2f}, w:{g[1]-g[0]:.2f})" for g in potential_gutters[:5]])
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Sorted potential gutters by width (desc): [{potential_gutters_str}]")
+
+    selected_midpoints: List[float] = []
+    min_gutter_pos_ratio = 0.15
+    max_gutter_pos_ratio = 0.85
+    min_separation = page_width * 0.30
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Selecting final column dividers. PageW: {page_width:.2f}, MinGutterPosRatio: {min_gutter_pos_ratio:.2f}, MaxGutterPosRatio: {max_gutter_pos_ratio:.2f}, MinSep: {min_separation:.2f}")
+
+    for g_start, g_end in potential_gutters:
+        mid_x = (g_start + g_end) / 2
+        logging.debug(f"  FITZ_DEBUG: Considering gutter ({g_start:.2f}-{g_end:.2f}), mid_x: {mid_x:.2f}")
+        if not (page_width * min_gutter_pos_ratio < mid_x < page_width * max_gutter_pos_ratio):
+            logging.debug(f"    FITZ_DEBUG: -> Rejected: mid_x not in range ({page_width * min_gutter_pos_ratio:.2f} - {page_width * max_gutter_pos_ratio:.2f})")
+            continue
+        if any(abs(mid_x - prev) < min_separation for prev in selected_midpoints):
+            logging.debug(f"    FITZ_DEBUG: -> Rejected: too close to already selected dividers {selected_midpoints}")
+            continue
+        selected_midpoints.append(mid_x)
+        logging.debug(f"    FITZ_DEBUG: -> Accepted: mid_x {mid_x:.2f}. Current dividers: {selected_midpoints}")
+        if len(selected_midpoints) >= 2: 
+            logging.debug(f"  FITZ_DEBUG: Reached max 2 dividers (3 columns). Stopping.")
+            break
+    
+    if not selected_midpoints and potential_gutters:
+        best_gutter = potential_gutters[0]
+        fallback_midpoint = (best_gutter[0] + best_gutter[1]) / 2
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: No suitable dividers found with strict criteria. Fallback to widest gutter: ({best_gutter[0]:.2f}-{best_gutter[1]:.2f}), mid: {fallback_midpoint:.2f}")
+        selected_midpoints.append(fallback_midpoint)
+
+    column_dividers = sorted(selected_midpoints)
+    column_dividers_str = ", ".join([f"{d:.2f}" for d in column_dividers])
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Final column dividers: [{column_dividers_str}]")
+
+    num_columns = len(column_dividers) + 1
+    logging.info(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Estimated {num_columns} columns with dividers at [{column_dividers_str}]")
+
+    # --- 2. ブロックをカラムに割り当て ---
+    columns_data: List[List[Dict]] = [[] for _ in range(num_columns)]
+    current_page_blocks = sorted(block_properties, key=lambda b: (b['y0'], b['x0'])) 
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Assigning {len(current_page_blocks)} blocks (sorted by y0, x0) to {num_columns} columns.")
+
+    for block_idx, block in enumerate(current_page_blocks):
+        block_center_x = (block['x0'] + block['x1']) / 2
+        assigned_column = 0
+        for i, divider_x in enumerate(column_dividers):
+            if block_center_x > divider_x:
+                assigned_column = i + 1
+            else:
+                break
+        
+        if assigned_column < num_columns:
+             columns_data[assigned_column].append(block)
+             logging.debug(f"  FITZ_DEBUG: Block {block_idx} (y0={block['y0']:.1f}, x0={block['x0']:.1f}, x1={block['x1']:.1f}, ctr_x={block_center_x:.2f}, text='{block['text'][:20].replace('\\n',' ')}...') -> Col {assigned_column}")
+        else: 
+             logging.warning(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Block {block_idx} (center_x={block_center_x:.2f}) assigned to out-of-bounds column {assigned_column} (max={num_columns-1}). Assigning to last column.")
+             columns_data[num_columns-1].append(block) 
+    
+    for c_idx, c_data in enumerate(columns_data):
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Column {c_idx} has {len(c_data)} blocks. Preview:")
+        for b_idx_in_col, b_in_col in enumerate(c_data[:3]): 
+            logging.debug(f"    FITZ_DEBUG: Col {c_idx} Block {b_idx_in_col}: y0={b_in_col['y0']:.2f}, x0={b_in_col['x0']:.2f}, text='{b_in_col['text'][:30].replace('\\n', ' ')}...'")
+
+    # --- 3. 各カラム内でブロックをY座標でソートし、テキストを結合 ---
+    result_text_parts = []
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Joining text for {num_columns} columns.")
+    for i in range(num_columns):
+        sorted_column_blocks = columns_data[i] 
+        
+        column_text_fragments = []
+        for blk_idx, blk in enumerate(sorted_column_blocks):
+            block_text_stripped = blk['text'].strip()
+            if block_text_stripped:
+                column_text_fragments.append(block_text_stripped)
+
+        column_text = "\\n".join(column_text_fragments).strip()
+        if column_text:
+            logging.debug(f"  FITZ_DEBUG: Column {i} combined text (len={len(column_text)}): '{column_text[:100].replace('\\n', ' ')}...'")
+            result_text_parts.append(column_text)
+        else:
+            logging.debug(f"  FITZ_DEBUG: Column {i} produced no text after stripping/joining.")
+    
+    final_text = "\\n\\n".join(result_text_parts).strip()
+
+    logging.info(
+        f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Extracted. Columns={num_columns}, Final text length={len(final_text)}"
+    )
+    logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Final text preview (first 200 chars): '{final_text[:200].replace('\\n', ' ')}...'")
+
+    # --- 2.5 ゾーンベース結合 (単一カラムブロックとマルチカラムブロック混在対応) ---
+    def _is_spanning(b: Dict) -> bool:
+        """ブロックが全カラムを跨ぐ (フル幅) かどうかを判定するヘルパ"""
+        if num_columns <= 1:
+            return True  # 1カラムの場合は常にスパン扱い
+        width = b['x1'] - b['x0']
+        cross_cnt = sum(1 for div in column_dividers if b['x0'] < div < b['x1'])
+        # 全てのカラム境界を跨ぎ、ページ幅の6割以上を占める場合のみフル幅とみなす
+        return cross_cnt == len(column_dividers) and width >= page_width * 0.60
+
+    has_spanning_block = any(_is_spanning(b) for b in block_properties) if num_columns > 1 else False
+ 
+    if has_spanning_block:
+        blocks_sorted_y = sorted(block_properties, key=lambda b: b['y0'])
+        result_text_parts: List[str] = []
+        idx_z = 0
+        while idx_z < len(blocks_sorted_y):
+            blk_z = blocks_sorted_y[idx_z]
+            spans_columns = _is_spanning(blk_z)
+            if spans_columns:
+                txt_piece = blk_z['text'].strip()
+                if txt_piece:
+                    result_text_parts.append(txt_piece)
+                idx_z += 1
+                continue
+            zone_blocks: List[Dict] = []
+            while idx_z < len(blocks_sorted_y):
+                zb = blocks_sorted_y[idx_z]
+                zb_spans = _is_spanning(zb)
+                if zb_spans:
+                    break
+                zone_blocks.append(zb)
+                idx_z += 1
+            if not zone_blocks:
+                continue
+            zone_cols: List[List[Dict]] = [[] for _ in range(num_columns)]
+            for zb in zone_blocks:
+                ctr_x = (zb['x0'] + zb['x1']) / 2
+                cidx = 0
+                for j, div in enumerate(column_dividers):
+                    if ctr_x > div:
+                        cidx = j + 1
+                    else:
+                        break
+                zone_cols[cidx].append(zb)
+            for c_blocks in zone_cols:
+                if not c_blocks:
+                    continue
+                c_blocks_sorted = sorted(c_blocks, key=lambda b: b['y0'])
+                c_text = "\n".join(b['text'].strip() for b in c_blocks_sorted if b['text'].strip()).strip()
+                if c_text:
+                    result_text_parts.append(c_text)
+        final_zone_text = "\n\n".join(result_text_parts).strip()
+        if final_zone_text:
+            logging.info(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Extracted with zone-aware assembly. Final text length={len(final_zone_text)}")
+            logging.debug(f"[{pdf_path.name} - Page {page.page_number}] FITZ_DEBUG: Final zone text preview (first 200 chars): '{final_zone_text[:200].replace('\n', ' ')}...'")
+            return final_zone_text
+
+    # ゾーン方式を適用しない場合、または結果が得られなかった場合は列結合のみの結果を返す
+    return final_text if final_text else None
 
 def _extract_text_vertical_fitz(page: Page) -> Optional[str]:
     """PyMuPDF の span(wmode=1) 情報を用いた縦書きテキスト抽出。
@@ -1115,21 +1154,22 @@ def _extract_text_vertical_fitz(page: Page) -> Optional[str]:
     4. 各カラム内を y 昇順に並べてテキスト結合。
     5. (cid:xxx) 擬似文字を除去して返す。
     """
-
-    try:
-        import fitz  # type: ignore
-    except ImportError:
+    if not _FITZ_AVAILABLE:
+        logging.warning(f"[{Path(page.pdf.stream.name).name} - Page {page.page_number}] _extract_text_vertical_fitz called but fitz is not available.")
         return None
-
+    
     pdf_path = Path(page.pdf.stream.name)
     try:
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] (vertical_fitz) Attempting to open with fitz: {pdf_path}")
         doc = fitz.open(pdf_path)
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] (vertical_fitz) Fitz doc opened. Loading page {page.page_number - 1}")
         p = doc[page.page_number - 1]
         page_dict = p.get_text("dict")
         page_width = p.rect.width
         doc.close()
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] (vertical_fitz) Fitz page_dict retrieved.")
     except Exception as e:
-        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] _extract_text_vertical_fitz error: {e}")
+        logging.debug(f"[{pdf_path.name} - Page {page.page_number}] _extract_text_vertical_fitz error: {e}", exc_info=True)
         return None
 
     if not page_dict or "blocks" not in page_dict:
@@ -1193,21 +1233,67 @@ def _extract_text_vertical_fitz(page: Page) -> Optional[str]:
     final_text = _remove_cid_artifacts(final_text)
     return final_text.strip() if final_text.strip() else None
 
-def _needs_ocr_vertical(text: str | None, min_cjk: int = 200, max_cid_ratio: float = 0.10) -> bool:
-    """縦書き抽出結果が低品質かどうかを判定し、OCR フォールバックが必要かを返す
+# -------------------------------------------------
+#  縦書き判定 & 抽出ユーティリティ
+# -------------------------------------------------
 
-    判定基準:
-    1. CJK 文字数が ``min_cjk`` 未満
-    2. ``(cid:xxx)`` の混入率が ``max_cid_ratio`` を超える
+def _is_likely_vertical_text(page: Page, sample_size: int = 200) -> bool:
+    """ページが縦書きレイアウトである可能性を簡易判定する。
+
+    ヒューリスティック:
+    1. `extract_words` で取得した word の bbox を利用。
+    2. 幅 (x1-x0) より高さ (bottom-top) が明らかに大きい word が多い場合を縦書きとみなす。
+       ※回転 PDF など例外もあるため、ページメタ情報の `/Rotate` までは見ない簡易版。
     """
+
+    try:
+        words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
+    except Exception:
+        return False
+
+    if not words:
+        return False
+
+    sample = words[:sample_size]
+    vert_like = 0
+    for w in sample:
+        w_width = w["x1"] - w["x0"]
+        w_height = w["bottom"] - w["top"]
+        if w_height == 0:
+            continue
+        if w_height / max(w_width, 1) > 1.8:  # 高さが幅の1.8倍以上 → 縦長
+            vert_like += 1
+
+    return vert_like >= len(sample) * 0.3  # 30% 以上縦長なら縦書きと判断 (閾値緩和)
+
+def _extract_text_vertical_pdfplumber(page: Page) -> Optional[str]:
+    """pdfplumber の writing_mode='vertical' を用いた縦書きテキスト抽出"""
+    try:
+        txt = page.extract_text(layout=True, writing_mode="vertical", x_tolerance=3, y_tolerance=3)
+    except Exception:
+        return None
+
+    return txt.strip() if txt else None
+
+# 不正な (cid:123) のようなグリフ参照を取り除くヘルパ
+_re_cid = re.compile(r"\\(cid:\\d+\\)")
+# CJK 文字判定用の正規表現 (縦書き品質チェックなどで利用)
+_re_cjk = re.compile(r"[\\u3000-\\u9fff]")
+# ひらがなのみで構成される1-4文字の行にマッチする正規表現 (ルビ除去用)
+_re_short_hiragana_line = re.compile(r"^[ぁ-ゞ]{1,4}$")
+
+def _remove_cid_artifacts(text: str) -> str:
+    """pdfplumber が Unicode マッピングに失敗した際に現れる (cid:123) 等を除去"""
+    return _re_cid.sub("", text)
+
+def _remove_short_hiragana_lines(text: str | None) -> str | None:
+    """テキストから、ひらがなのみで構成される短い行（ルビと想定）を除去する。"""
     if not text:
-        return True
-
-    cid_count = len(_re_cid.findall(text))
-    cid_ratio = cid_count / max(len(text), 1)
-    cjk_count = len(_re_cjk.findall(text))
-
-    return (cjk_count < min_cjk) or (cid_ratio > max_cid_ratio)
+        return None
+    
+    lines = text.splitlines()
+    cleaned_lines = [line for line in lines if not _re_short_hiragana_line.fullmatch(line.strip())]
+    return "\n".join(cleaned_lines)
 
 def _extract_text_vertical_ocr(pdf_path: Path, page_num: int) -> Optional[str]:
     """縦書きページ用 OCR 抽出ラッパ。

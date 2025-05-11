@@ -1,29 +1,74 @@
 [
   {
-    "timestamp": "2025-05-11T06:34:44.897601",
-    "pdf_name": "01_single-column_basic-layout_1.pdf",
-    "test_function": "test_single_column_accuracy[pro]",
-    "similarity": 0.7441860465116279,
-    "status": "failed",
+    "timestamp": "2025-05-11T18:19:44.254614",
+    "pdf_name": "01_single-column_basic-layout.pdf",
+    "test_function": "test_single_column_accuracy[free]",
+    "similarity": 0.9841405915130733,
+    "status": "passed",
     "method_info": "",
-    "duration": 44.948354584004846
+    "duration": 1.4799825829977635
   },
   {
-    "timestamp": "2025-05-11T06:35:09.032022",
-    "pdf_name": "02_multi-column_2.pdf",
-    "test_function": "test_multi_column_accuracy[pro]",
-    "similarity": 0.0,
+    "timestamp": "2025-05-11T18:19:45.185336",
+    "pdf_name": "02_multi-column.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test0-gt_to_test0-0.65]",
+    "similarity": 0.20520673813169985,
     "status": "failed",
     "method_info": "",
-    "duration": 24.111253291004687
+    "duration": 0.9095974999945611
   },
   {
-    "timestamp": "2025-05-11T06:35:48.343082",
-    "pdf_name": "03_vertical-text_novel-format_1.pdf",
-    "test_function": "test_vertical_text_accuracy[pro]",
-    "similarity": 0.15912285633961204,
+    "timestamp": "2025-05-11T18:19:46.158323",
+    "pdf_name": "03_multi-column.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test1-gt_to_test1-0.65]",
+    "similarity": 0.9384027187765506,
+    "status": "passed",
+    "method_info": "",
+    "duration": 0.9721098329900997
+  },
+  {
+    "timestamp": "2025-05-11T18:19:47.078287",
+    "pdf_name": "04_multi-column.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test2-gt_to_test2-0.65]",
+    "similarity": 0.7950760318609703,
+    "status": "passed",
+    "method_info": "",
+    "duration": 0.918847499997355
+  },
+  {
+    "timestamp": "2025-05-11T18:19:48.049108",
+    "pdf_name": "05_multi-column_magazine-style.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test3-gt_to_test3-0.65]",
+    "similarity": 0.8635784105397365,
+    "status": "passed",
+    "method_info": "",
+    "duration": 0.9696987079951214
+  },
+  {
+    "timestamp": "2025-05-11T18:19:49.018103",
+    "pdf_name": "06_multi-column_magazine-style.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test4-gt_to_test4-0.65]",
+    "similarity": 0.6913475777448699,
+    "status": "passed",
+    "method_info": "",
+    "duration": 0.9679388749937061
+  },
+  {
+    "timestamp": "2025-05-11T18:19:49.989121",
+    "pdf_name": "07_multi-column_magazine-style.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test5-gt_to_test5-0.65]",
+    "similarity": 0.9494346063580115,
+    "status": "passed",
+    "method_info": "",
+    "duration": 0.9699506670003757
+  },
+  {
+    "timestamp": "2025-05-11T18:19:51.019475",
+    "pdf_name": "08_multi-column_magazine-style.pdf",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test6-gt_to_test6-0.65]",
+    "similarity": 0.5445524085176763,
     "status": "failed",
     "method_info": "",
-    "duration": 39.296140874997946
+    "duration": 1.0218238749948796
   }
 ]

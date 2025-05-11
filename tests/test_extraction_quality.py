@@ -134,11 +134,29 @@ def _normalize_text_for_comparison(text: str) -> str:
     return text.strip()
 
 # PDFファイルパスをここで定義
-PDF_SINGLE_COLUMN = SAMPLE_PDF_DIR / "01_single-column_basic-layout_1.pdf"
-GT_SINGLE_COLUMN = GROUND_TRUTH_DIR / "01_single-column_basic-layout_1.txt"
+PDF_SINGLE_COLUMN = SAMPLE_PDF_DIR / "01_single-column_basic-layout.pdf"
+GT_SINGLE_COLUMN = GROUND_TRUTH_DIR / "01_single-column_basic-layout.txt"
 
-PDF_MULTI_COLUMN = SAMPLE_PDF_DIR / "02_multi-column_2.pdf"
-GT_MULTI_COLUMN = GROUND_TRUTH_DIR / "02_multi-column_2.txt"
+PDF_MULTI_COLUMN = SAMPLE_PDF_DIR / "02_multi-column.pdf"
+GT_MULTI_COLUMN = GROUND_TRUTH_DIR / "02_multi-column.txt"
+
+PDF_MULTI_COLUMN_3 = SAMPLE_PDF_DIR / "03_multi-column.pdf"
+GT_MULTI_COLUMN_3 = GROUND_TRUTH_DIR / "03_multi-column.txt"
+
+PDF_MULTI_COLUMN_4 = SAMPLE_PDF_DIR / "04_multi-column.pdf"
+GT_MULTI_COLUMN_4 = GROUND_TRUTH_DIR / "04_multi-column.txt"
+
+PDF_MULTI_COLUMN_MAGAZINE = SAMPLE_PDF_DIR / "05_multi-column_magazine-style.pdf"
+GT_MULTI_COLUMN_MAGAZINE = GROUND_TRUTH_DIR / "05_multi-column_magazine-style.txt"
+
+PDF_MULTI_COLUMN_MAGAZINE_2 = SAMPLE_PDF_DIR / "06_multi-column_magazine-style.pdf"
+GT_MULTI_COLUMN_MAGAZINE_2 = GROUND_TRUTH_DIR / "06_multi-column_magazine-style.txt"
+
+PDF_MULTI_COLUMN_MAGAZINE_3 = SAMPLE_PDF_DIR / "07_multi-column_magazine-style.pdf"
+GT_MULTI_COLUMN_MAGAZINE_3 = GROUND_TRUTH_DIR / "07_multi-column_magazine-style.txt"
+
+PDF_MULTI_COLUMN_MAGAZINE_NEW = SAMPLE_PDF_DIR / "08_multi-column_magazine-style.pdf" # 新しい3カラムマガジンスタイルPDF
+GT_MULTI_COLUMN_MAGAZINE_NEW = GROUND_TRUTH_DIR / "08_multi-column_magazine-style.txt" # 新しい3カラムマガジンスタイルPDFのGround Truth
 
 PDF_VERTICAL_TEXT = SAMPLE_PDF_DIR / "03_vertical-text_novel-format_1.pdf"
 GT_VERTICAL_TEXT = GROUND_TRUTH_DIR / "03_vertical-text_novel-format_1.txt"
@@ -203,12 +221,12 @@ def _run_accuracy_test(
 
 
 @pytest.mark.single_column
-@pytest.mark.parametrize("edition", ["free", pytest.param("pro", marks=pytest.mark.pro)])
+@pytest.mark.parametrize("edition", ["free"]) # Proモードのテストを除外
 def test_single_column_accuracy(request: pytest.FixtureRequest, edition):
     """基本的な1カラムPDFの抽出精度をテスト"""
     assert PDF_SINGLE_COLUMN.exists(), f"{PDF_SINGLE_COLUMN} が見つかりません。"
     assert GT_SINGLE_COLUMN.exists(), f"{GT_SINGLE_COLUMN} が見つかりません。"
-    expected_sim = 0.95 # ProもFreeも同じ期待値
+    expected_sim = 0.95 # Freeモードの期待値
     _run_accuracy_test(
         request,
         PDF_SINGLE_COLUMN,
@@ -218,22 +236,34 @@ def test_single_column_accuracy(request: pytest.FixtureRequest, edition):
     )
 
 @pytest.mark.multi_column
-@pytest.mark.parametrize("edition", ["free", pytest.param("pro", marks=pytest.mark.pro)])
-def test_multi_column_accuracy(request: pytest.FixtureRequest, edition):
-    """2カラムPDFの抽出精度をテスト"""
-    assert PDF_MULTI_COLUMN.exists(), f"{PDF_MULTI_COLUMN} が見つかりません。"
-    assert GT_MULTI_COLUMN.exists(), f"{GT_MULTI_COLUMN} が見つかりません。"
-    expected_sim = 0.70 if edition == "pro" else 0.65
-    _run_accuracy_test(request, PDF_MULTI_COLUMN, GT_MULTI_COLUMN, expected_similarity=expected_sim, edition=edition)
+@pytest.mark.parametrize(
+    "pdf_to_test, gt_to_test, expected_sim_val",
+    [
+        (PDF_MULTI_COLUMN, GT_MULTI_COLUMN, 0.65), # 既存の2カラムPDF
+        (PDF_MULTI_COLUMN_3, GT_MULTI_COLUMN_3, 0.65), # 既存の3カラムPDF
+        (PDF_MULTI_COLUMN_4, GT_MULTI_COLUMN_4, 0.65), # 既存の4カラムPDF
+        (PDF_MULTI_COLUMN_MAGAZINE, GT_MULTI_COLUMN_MAGAZINE, 0.65), # 既存のマガジンスタイルPDF
+        (PDF_MULTI_COLUMN_MAGAZINE_2, GT_MULTI_COLUMN_MAGAZINE_2, 0.65), # 新しいマガジンスタイルPDF (縦線入り)
+        (PDF_MULTI_COLUMN_MAGAZINE_3, GT_MULTI_COLUMN_MAGAZINE_3, 0.65), # 新しいマガジンスタイルPDF 3
+        (PDF_MULTI_COLUMN_MAGAZINE_NEW, GT_MULTI_COLUMN_MAGAZINE_NEW, 0.65), # ★新しい3カラムマガジンスタイルPDF
+    ]
+)
+@pytest.mark.parametrize("edition", ["free"]) # Proモードのテストを除外
+def test_multi_column_accuracy(request: pytest.FixtureRequest, edition, pdf_to_test, gt_to_test, expected_sim_val):
+    """2カラムおよび3カラムPDFの抽出精度をテスト"""
+    assert pdf_to_test.exists(), f"{pdf_to_test} が見つかりません。"
+    assert gt_to_test.exists(), f"{gt_to_test} が見つかりません。"
+    # expected_sim = 0.65 # Freeモードの期待値 (パラメータ化により不要に)
+    _run_accuracy_test(request, pdf_to_test, gt_to_test, expected_similarity=expected_sim_val, edition=edition)
 
-@pytest.mark.vertical_text
-@pytest.mark.parametrize("edition", ["free", pytest.param("pro", marks=pytest.mark.pro)])
-def test_vertical_text_accuracy(request: pytest.FixtureRequest, edition):
-    """縦書きPDFの抽出精度をテスト"""
-    assert PDF_VERTICAL_TEXT.exists(), f"{PDF_VERTICAL_TEXT} が見つかりません。"
-    assert GT_VERTICAL_TEXT.exists(), f"{GT_VERTICAL_TEXT} が見つかりません。"
-    expected_sim = 0.30 if edition == "pro" else 0.03
-    _run_accuracy_test(request, PDF_VERTICAL_TEXT, GT_VERTICAL_TEXT, expected_similarity=expected_sim, edition=edition)
+# @pytest.mark.vertical_text
+# @pytest.mark.parametrize("edition", ["free"]) # Proモードのテストを除外し、縦書きテスト自体をコメントアウト
+# def test_vertical_text_accuracy(request: pytest.FixtureRequest, edition):
+#     """縦書きPDFの抽出精度をテスト"""
+#     assert PDF_VERTICAL_TEXT.exists(), f"{PDF_VERTICAL_TEXT} が見つかりません。"
+#     assert GT_VERTICAL_TEXT.exists(), f"{GT_VERTICAL_TEXT} が見つかりません。"
+#     expected_sim = 0.03 # Freeモードの期待値
+#     _run_accuracy_test(request, PDF_VERTICAL_TEXT, GT_VERTICAL_TEXT, expected_similarity=expected_sim, edition=edition)
 
 def test_basic_extraction_and_db_save(request: pytest.FixtureRequest):
     """

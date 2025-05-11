@@ -31,13 +31,8 @@ class SimpleExtractor(BaseExtractor):
         if extract_mod is None:
             raise RuntimeError("extract.py が見つからず SimpleExtractor を実行できません。")
 
-        force_ocr: bool = kwargs.get("force_ocr", False)
-        no_ocr_fallback: bool = kwargs.get("no_ocr_fallback", False)
-
         # 既存のメイン関数を呼び出す
         return extract_mod.extract_and_process_pdf(
             pdf_path,
             patent_mode=self.patent_mode,
-            force_ocr=force_ocr,
-            no_ocr_fallback=no_ocr_fallback,
         ) 

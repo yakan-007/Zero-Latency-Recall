@@ -137,7 +137,7 @@ zlr.sqlite-journal
 # Sample PDFs and Test PDFs
 sample/**/*.pdf
 samples/**/*.pdf
-tests/sample_pdfs/**/*.pdf
+# tests/sample_pdfs/ 内の PDF はテストで必要なため追跡対象とする（除外しない）
 
 # Configuration files that might contain secrets (if not using a template)
 # config.py 
@@ -149,4 +149,12 @@ tests/sample_pdfs/**/*.pdf
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db
+
+# Local test result artifacts
+test_results*.json
+tmp_extract.txt
+debug.log
+db_dump.txt
+.pytest_cache/
+test_debug.sqlite 

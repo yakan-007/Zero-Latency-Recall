@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from extractor.advanced import AdvancedExtractor
+from extractor.simple import SimpleExtractor
 
 # extract.py にある正規化ユーティリティを再利用
 import importlib
@@ -45,9 +46,13 @@ def load_ground_truth(pdf_name):
 
 def extract_text_from_pdf(pdf_path: Path, extractor_type: str = "advanced"):
     """PDFからテキストを抽出する"""
+    paragraphs = []
     if extractor_type == "advanced":
         # AdvancedExtractor を使用
         extractor = AdvancedExtractor(patent_mode=False)
+        paragraphs = extractor.process_pdf(pdf_path)
+    elif extractor_type == "simple":
+        extractor = SimpleExtractor(patent_mode=False)
         paragraphs = extractor.process_pdf(pdf_path)
     else:
         # デフォルトは extract.py の関数 (互換性のため残す場合)
@@ -65,18 +70,15 @@ def main():
     # テスト用PDFディレクトリ
     pdf_dir = Path("tests/sample_pdfs")
     
-    # 結果を保存するリスト
-    results = []
-    
-    # extractor_type を指定できるようにする (例: "advanced" または "simple")
-    # ここでは "advanced" に固定
-    current_extractor_type = "advanced"
-    print(f"--- Using Extractor: {current_extractor_type} ---")
+    extractor_types_to_test = ["simple"]
 
+    for current_extractor_type in extractor_types_to_test:
+        print(f"\n{'='*10} Testing Extractor: {current_extractor_type.upper()} {'='*10}")
+    results = []
     # 各PDFファイルに対してテストを実行
     for pdf_file in pdf_dir.glob("*.pdf"):
         pdf_name = pdf_file.stem
-        print(f"\n処理中: {pdf_name}")
+            print(f"\n処理中 ({current_extractor_type}): {pdf_name}")
         
         # 正解テキストを読み込む
         ground_truth = load_ground_truth(pdf_name)
@@ -85,7 +87,7 @@ def main():
             continue
         
         # PDFからテキストを抽出
-        extracted_text = extract_text_from_pdf(pdf_file, extractor_type=current_extractor_type)
+            extracted_text = extract_text_from_pdf(pdf_file, extractor_type=current_extractor_type)
         
         # 類似度を計算
         similarity = calculate_similarity(ground_truth, extracted_text)
@@ -93,26 +95,25 @@ def main():
         # 結果を保存
         results.append({
             "pdf_name": pdf_name,
-            "similarity": similarity,
-            "extractor": current_extractor_type
+                "similarity": similarity,
+                "extractor": current_extractor_type
         })
         
-        print(f"類似度: {similarity:.4f}")
+            print(f"類似度 ({current_extractor_type}): {similarity:.4f}")
     
     # 全体的な結果を表示
     if results:
         similarities = [r["similarity"] for r in results]
-        print("\n=== 全体の結果 ===")
-        print(f"使用エクストラクタ: {current_extractor_type}")
+            print(f"\n=== 全体の結果 ({current_extractor_type.upper()}) ===")
         print(f"平均類似度: {np.mean(similarities):.4f}")
         print(f"最小類似度: {np.min(similarities):.4f}")
         print(f"最大類似度: {np.max(similarities):.4f}")
         
         # 結果をJSONファイルに保存
-        output_filename = f"test_results_{current_extractor_type}.json"
-        with open(output_filename, "w", encoding='utf-8') as f:
+            output_filename = f"test_results_{current_extractor_type}.json"
+            with open(output_filename, "w", encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"\n結果を{output_filename}に保存しました")
+            print(f"\n結果を{output_filename}に保存しました")
 
 if __name__ == "__main__":
     main() 
