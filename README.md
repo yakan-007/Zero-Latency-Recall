@@ -13,6 +13,8 @@
 *   **マルチカラム対応**: `pdfplumber` の単語情報や `PyMuPDF` のブロック情報を用いた複数のヒューリスティックで段組みを解析。
 *   **縦書き対応**: 縦書きレイアウトを判定し、`pdfplumber` や `PyMuPDF` の縦書きモード、または OCR (`jpn_vert`) を利用。
 *   **SQLite 出力**: 抽出結果を段落単位で正規化し、`docs` (FTS5) テーブルへ保存。全文検索にそのまま利用可能。
+*   **Obsidian連携**: 抽出した段落は検索機能と連動し、Obsidianのナレッジベースに自動統合できます。
+*   **フォルダ監視機能**: 指定フォルダにPDFファイルを追加するだけで自動的に処理。
 *   **モジュール化された設計**: 抽出ロジック、DB操作、CLIが分離され、拡張性とメンテナンス性が向上。
 *   **pytest テストスイート**: Ground Truth との文字列類似度で抽出精度を評価。
 
@@ -71,6 +73,7 @@ pip install pytesseract Pillow pdf2image PyMuPDF opencv-python numpy
 │   ├── db/
 │   │   └── repo.py           # SQLite データベース操作
 │   ├── config.py             # 設定ファイル (DBパスなど)
+│   ├── obsidian_export.py    # Obsidian連携ユーティリティ
 │   └── tags_JP.yaml          # 段落タグ付け用キーワード辞書
 ├── tests/                    # テストコード
 │   ├── sample_pdfs/          # テスト用 PDF
@@ -78,6 +81,7 @@ pip install pytesseract Pillow pdf2image PyMuPDF opencv-python numpy
 │   ├── test_accuracy.py      # 精度テスト (Simple/Advanced)
 │   └── test_extraction_quality.py # 抽出品質テスト (マルチカラムなど)
 ├── search.py                 # 検索スクリプト (Obsidian連携など)
+├── zlr_watch.py              # フォルダ監視スクリプト
 ├── README.md                 # 本ファイル
 └── requirements.txt          # Python 依存パッケージ
 ```
@@ -99,6 +103,20 @@ python -m extract <PDFファイル...> [--db_path <出力DBパス>] [--edition <
 *   `--force_ocr`: (`pro` 指定時) 全てのページで強制的に OCR を実行。
 *   `--log-level`: ログの詳細度 (DEBUG, INFO, WARNING, ERROR, CRITICAL)。
 
+### フォルダ監視 (Watch)
+
+指定されたフォルダを監視し、新しいPDFファイルが追加されると自動的に抽出処理を実行します。
+
+```bash
+# 環境変数を設定（必要に応じて）
+export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # Obsidian連携用
+
+# 監視を開始
+python zlr_watch.py
+```
+
+監視フォルダは `extract/config.py` の `WATCH_FOLDER_PATH` で指定します。監視中はターミナルに処理ログが表示されます。終了するには `Ctrl+C` を押してください。
+
 ### 検索 (Search)
 
 データベースに保存した内容を検索・表示します。
@@ -112,6 +130,62 @@ python search.py <キーワード...> [-t <タグ>] [-l <上限数>] [-o] [--db_
 *   `-l, --limit`: 表示する最大件数 (デフォルト: 50)。
 *   `-o, --obsidian`: 結果を Obsidian 連携用の Markdown 形式で出力。
 *   `--db_path`: 検索対象の SQLite ファイルパス (デフォルト: `zlr.sqlite`)。
+
+### Obsidian連携
+
+ZLRはObsidianと高度に連携し、PDF内容を知識管理システムに統合できます。
+
+**設定方法**:
+1. 環境変数 `OBSIDIAN_VAULT` にObsidian Vaultのパスを設定:
+   ```bash
+   # macOS / Linux
+   export OBSIDIAN_VAULT=/path/to/your/obsidian/vault
+   
+   # Windows
+   set OBSIDIAN_VAULT=C:\path\to\your\obsidian\vault
+   ```
+   
+   永続化するには `.env` ファイルをプロジェクトルートに作成:
+   ```
+   OBSIDIAN_VAULT=/path/to/your/obsidian/vault
+   ```
+
+**連携機能**:
+1. **段落スニペット**: PDF抽出時に、各段落が自動的に個別Markdownファイルとして保存されます
+   - 保存先: `<OBSIDIAN_VAULT>/zlr-inbox/zlr-snippets/`
+   - ファイル形式: YAML Front Matter + 引用ブロック形式
+   - ファイル名: `<doc_slug>_p<page>_<idx>.md`
+
+2. **検索結果**: 検索時に `-o` オプションを使用すると、結果が Markdown 形式で保存され、各スニペットへのリンクが含まれます
+   - 保存先: `<OBSIDIAN_VAULT>/zlr-inbox/`
+
+この仕組みにより、Obsidianの強力な機能（バックリンク、タグ、検索、Dataviewなど）を活用して知識体系を構築できます。
+
+---
+
+## 基本的なワークフロー
+
+1. **環境設定**:
+   ```bash
+   export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # Obsidian連携用
+   ```
+
+2. **PDF抽出**:
+   ```bash
+   python -m extract sample.pdf
+   ```
+   または監視モードで自動処理:
+   ```bash
+   python zlr_watch.py
+   ```
+
+3. **検索・参照**:
+   ```bash
+   python search.py キーワード -o
+   ```
+   Obsidianで `zlr-inbox` フォルダを確認すると、検索結果とスニペットが保存されています。
+
+4. **知識活用**: ObsidianでPDF内容を参照しながら、自分のノートに引用・リンクして活用できます。
 
 ---
 

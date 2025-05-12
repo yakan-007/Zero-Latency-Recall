@@ -2,6 +2,7 @@ import sqlite3
 import logging
 from pathlib import Path
 from typing import List, Tuple
+from ..obsidian_export import export_paragraphs_to_obsidian
 
 # -----------------------------------------------------------------------------
 #  データベース関連 & メイン CLI  (復旧) <- 元のコメントは不要かも
@@ -53,4 +54,9 @@ def save_paragraphs_to_db(db_path: Path, doc_id: str, paragraphs: List[Paragraph
             ],
         )
         conn.commit()
-        logging.info("[DB] %s に %d 段落を保存しました。", db_path.name, len(paragraphs)) 
+        logging.info("[DB] %s に %d 段落を保存しました。", db_path.name, len(paragraphs))
+        # 追加: Obsidian にも保存
+        try:
+            export_paragraphs_to_obsidian(paragraphs)
+        except Exception as e:
+            logging.error("[DB] Obsidian へのエクスポートに失敗しました: %s", e) 

@@ -5,7 +5,7 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import subprocess
-from config import WATCH_FOLDER_PATH, DB_PATH
+from extract.config import WATCH_FOLDER_PATH, DB_PATH
 
 # ロギング設定
 logging.basicConfig(
@@ -38,9 +38,9 @@ class PDFEventHandler(FileSystemEventHandler):
         try:
             pdf_path = Path(event_path_str)
             if pdf_path.exists() and pdf_path.suffix.lower() == ".pdf":
-                cmd = ["python", "extract.py", str(pdf_path)]
-                logging.info(f"↓↓↓ extract.py を実行します: {' '.join(cmd)} ↓↓↓")
-                # extract.py に --patent オプションが必要な場合のロジックは別途検討
+                cmd = ["python", "-m", "extract", str(pdf_path)]
+                logging.info(f"↓↓↓ extract モジュールを実行します: {' '.join(cmd)} ↓↓↓")
+                # extract.py に --patent オプションが必要な場合のロジックは別途検討 -> 不要に (edition オプションはあるが、watchでは通常抽出)
                 # ここではシンプルに通常PDFとして処理
                 result = subprocess.run(cmd, capture_output=True, text=True, check=False)
                 if result.returncode == 0:

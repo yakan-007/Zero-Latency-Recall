@@ -78,7 +78,7 @@ def search_database(tokens: list[str], db_path: Path, limit: int = 50, tag_filte
             provisional_limit = max(limit * 5, 500)
 
             sql = f"""
-                SELECT rowid, doc_id, page, tags,
+                SELECT rowid, doc_id, page, paragraph_num, tags,
                        snippet(docs, 0, '>>', '<<', '...', 15) AS snippet_text
                 FROM docs
                 WHERE {where_sql}
@@ -129,11 +129,15 @@ def format_for_obsidian(query: str, results: list[tuple], tokens: list[str]) -> 
     ]
 
     for record in results:
-        if len(record) == 5:
+        if len(record) == 6:
+            rowid, doc_id, page, para_idx, tags_str, snippet_text = record
+        elif len(record) == 5:
+            # 後方互換: paragraph_num なし
             rowid, doc_id, page, tags_str, snippet_text = record
+            para_idx = None
         else:
-            # 後方互換: tags 列なし
             rowid, doc_id, page, snippet_text = record
+            para_idx = None
             tags_str = ""
         formatted_snippet = " ".join(snippet_text.splitlines()).strip()
         for tk in tokens:
@@ -141,10 +145,12 @@ def format_for_obsidian(query: str, results: list[tuple], tokens: list[str]) -> 
                 formatted_snippet = re.sub(re.escape(tk), f'>>{tk}<<', formatted_snippet)
         wrapped_snippet = textwrap.fill(formatted_snippet, width=80, initial_indent='    ', subsequent_indent='    ')
         # Obsidian で PDF を開く際の参考リンク (ファイル名#page=)
-        pdf_link = f"[{doc_id} (p{page})]({doc_id}#page={page})" if str(doc_id).lower().endswith('.pdf') else f"{doc_id} p{page}"
-
+        slug = "".join(c if c.isalnum() or c in '_-' else '_' for c in Path(doc_id).stem)[:60]
+        note_filename = f"{slug}_p{page:03d}_{para_idx:02d}.md" if para_idx is not None else None
+        link_display = f"[[{note_filename}]]" if note_filename else f"{doc_id} p{page}"
         tag_note = f" | Tags: {tags_str}" if tags_str else ""
-        output_lines.append(f"## ID: {rowid} | {pdf_link}{tag_note}")
+        para_note = f" | Para: {para_idx}" if para_idx is not None else ""
+        output_lines.append(f"## ID: {rowid} | {link_display}{para_note}{tag_note}")
         output_lines.append(f"> {wrapped_snippet}") # snippet を引用ブロックで表示
         output_lines.append("") # 空行
 
@@ -196,54 +202,82 @@ def save_to_obsidian(content: str, query: str):
     except OSError as e:
         print(f"エラー: ファイル ({filepath}) の書き込みに失敗しました: {e}", file=sys.stderr)
     except Exception as e:
-         print(f"エラー: ファイル保存中に予期せぬ問題が発生しました: {e}", file=sys.stderr)
+        print(f"エラー: ファイル保存中に予期せぬ問題が発生しました: {e}", file=sys.stderr)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SQLite FTS5 データベースを検索します。")
-    parser.add_argument("keywords", nargs='+', help="検索キーワード (スペース区切りでAND検索)")
-    parser.add_argument("-o", "--obsidian", action="store_true", help="検索結果をMarkdownファイルとして保存する")
-    parser.add_argument("-l", "--limit", type=int, default=50, help="表示する最大結果数 (デフォルト: 50)")
-    parser.add_argument("-t", "--tags", nargs='*', help="絞り込みタグ (スペース区切り) 例: claims background")
+    parser = argparse.ArgumentParser(
+        description="SQLite FTS5 テーブルから段落を検索します。",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+        使用例:
+          # "AI" と "技術" を含む段落を検索 (デフォルトDB)
+          python search.py AI 技術
+
+          # 特定のDBから "マルチカラム" を含む段落を検索し、タグ "layout" で絞り込み
+          python search.py マルチカラム --db_path my_docs.sqlite -t layout
+
+          # "セキュリティ" を含む段落を検索し、Obsidian用に保存
+          python search.py セキュリティ -o
+        """)
+    )
+    parser.add_argument("keywords", nargs='+', help="検索キーワード (スペース区切り)")
+    parser.add_argument("-o", "--obsidian", action="store_true", help="Obsidian 用 Markdown 形式で出力しファイル保存")
+    parser.add_argument("-l", "--limit", type=int, default=50, help="最大表示件数")
+    parser.add_argument(
+        "-t", "--tags", nargs='*', type=str, default=[], help="絞り込みタグ (スペース区切り、AND 検索)"
+    )
+    parser.add_argument(
+        "--db_path",
+        type=Path,
+        default=DB_PATH,
+        help=f"検索対象の SQLite DB ファイル (デフォルト: {DB_PATH})"
+    )
 
     args = parser.parse_args()
 
-    # tokens として保持
-    tokens = args.keywords
-    tag_filters = [_normalize_tag(t) for t in (args.tags or [])]
-    search_query = " ".join(tokens)
+    # タグを正規化 (小文字に)
+    tag_filters = [_normalize_tag(t) for t in args.tags]
 
-    print(f"検索クエリ: '{search_query}' (LIMIT: {args.limit})")
-    print("-" * 20)
+    # 修正: args.db_path を使用
+    results = search_database(args.keywords, args.db_path, limit=args.limit, tag_filters=tag_filters)
 
-    # 検索実行 (結果はリスト)
-    search_results = search_database(tokens, DB_PATH, args.limit, tag_filters)
+    if not results:
+        print("該当する結果は見つかりませんでした。")
+        return
 
-    result_count = len(search_results)
+    result_count = len(results)
 
     if result_count > 0:
         print(f"--- ヒット件数: {result_count} 件 ---")
-        for record in search_results:
-            if len(record) == 5:
+        for record in results:
+            if len(record) == 6:
+                rowid, doc_id, page, para_idx, tags_str, snippet_text = record
+            elif len(record) == 5:
+                # 後方互換: paragraph_num なし
                 rowid, doc_id, page, tags_str, snippet_text = record
+                para_idx = None
             else:
-                # 後方互換: tags 列なし
                 rowid, doc_id, page, snippet_text = record
+                para_idx = None
                 tags_str = ""
             formatted_snippet = " ".join(snippet_text.splitlines()).strip()
-            for tk in tokens:
+            for tk in args.keywords:
                 if len(tk) < 3:
                     formatted_snippet = re.sub(re.escape(tk), f'>>{tk}<<', formatted_snippet)
             wrapped_snippet = textwrap.fill(formatted_snippet, width=80, initial_indent='    ', subsequent_indent='    ')
-            print(f"ID: {rowid:<5} | Doc: {doc_id} (Page: {page}) Tags: {tags_str}")
+            slug = "".join(c if c.isalnum() or c in '_-' else '_' for c in Path(doc_id).stem)[:60]
+            note_filename = f"{slug}_p{page:03d}_{para_idx:02d}.md" if para_idx is not None else None
+            link_display = f"[[{note_filename}]]" if note_filename else f"{doc_id} p{page}"
+            print(f"ID: {rowid:<5} | {link_display} (p{page}, para {para_idx if para_idx is not None else '-'}) Tags: {tags_str}")
             print(wrapped_snippet)
             print("-" * 10)
         print(f"--- End of Results ---")
 
     # Obsidian 保存
     if args.obsidian:
-        obsidian_content = format_for_obsidian(search_query, search_results, tokens)
-        save_to_obsidian(obsidian_content, search_query)
+        obsidian_content = format_for_obsidian(" ".join(args.keywords), results, args.keywords)
+        save_to_obsidian(obsidian_content, " ".join(args.keywords))
 
 
 # タグ絞り込みを行うための正規化関数
