@@ -157,4 +157,35 @@ tmp_extract.txt
 debug.log
 db_dump.txt
 .pytest_cache/
-test_debug.sqlite 
+test_debug.sqlite
+
+# Temporary files and logs
+*.log
+*.sqlite-journal
+*.db-journal
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+test_*.sqlite
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Large files / Samples moved to misc_files
+misc_files/ 

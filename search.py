@@ -15,7 +15,7 @@ from datetime import datetime # 日時情報のためインポート
 
 # config から DB パスと Obsidian パスを読み込み (失敗しても動作継続)
 try:
-    from config import DB_PATH
+    from extract.config import DB_PATH
 except ImportError:
     print("警告: config.py が見つかりません。デフォルトのDBパス 'zlr.sqlite' を使用します。", file=sys.stderr)
     # プロジェクトルートからの相対パスを想定
@@ -23,7 +23,7 @@ except ImportError:
 
 try:
     # OBSIDIAN_INBOX_PATH はオプション扱いなので、なくてもエラーにしない
-    from config import OBSIDIAN_INBOX_PATH
+    from extract.config import OBSIDIAN_INBOX_PATH
 except (ImportError, AttributeError):
      OBSIDIAN_INBOX_PATH = None # 未設定の場合は None
 
