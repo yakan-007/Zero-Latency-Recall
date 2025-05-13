@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zlr"
+version = "0.1.0" # 初期バージョン
+# py_modules = ["zlr", "zlr_doctor", "zlr_watch", "search"] # 削除
+description = "ZLR: PDF Extraction and Recall System with Obsidian Integration"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT" # SPDX識別子として指定 (非推奨警告対応)
+authors = [
+  {name = "Your Name", email = "your.email@example.com"}, # ここはご自身の情報に置き換えてください
+]
+keywords = ["pdf", "text extraction", "fts5", "sqlite", "obsidian", "search", "japanese"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    # "License :: OSI Approved :: MIT License", # PEP 639に従い削除
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+    "Topic :: Utilities",
+    "Natural Language :: Japanese",
+]
+
+dependencies = [
+    "pdfplumber",
+    "watchdog",
+    "PyYAML",
+    "python-dotenv",
+    "pytesseract",
+    "Pillow",
+    "pdf2image",
+    "PyMuPDF",
+    "opencv-python",
+    "numpy",
+    # "sqlite-fts5" # 通常はPython標準のsqlite3でFTS5が有効なことが多いので必須ではない
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/zlr-dev" # ご自身のGitHubリポジトリURLに
+Documentation = "https://github.com/your-username/zlr-dev/blob/main/README.md" # 同上
+Repository = "https://github.com/your-username/zlr-dev.git" # 同上
+
+[project.scripts]
+zlr = "zlr:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff"
+]
+
+# [tool.setuptools] # このセクションを新設
+# py_modules = ["zlr", "zlr_doctor", "zlr_watch", "search"]
+
+[tool.setuptools.packages.find]
+where = ["src"]  # プロジェクトルートを検索対象とする -> srcに変更
+include = ["extract", "zlr", "zlr_doctor", "zlr_watch", "search"]  # src配下のモジュール/パッケージ名を指定
+exclude = ["tests*", "misc_files*", "extractor*"] # tests や misc_files, 古いextractorを除外 

@@ -7,9 +7,12 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# プロジェクトルートの定義 (config.py が src/extract/ にある想定)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent # 3段階親でプロジェクトルート
+
 # .env 読み込み
 # print("DEBUG: Attempting to load .env file...") # デバッグ削除
-env_path = Path('.') / '.env' # カレントディレクトリの .env を明示
+env_path = PROJECT_ROOT / '.env' # プロジェクトルートの .env を明示
 # print(f"DEBUG: Explicit .env path: {env_path.resolve()}") # デバッグ削除
 load_success = load_dotenv(dotenv_path=env_path, override=True) # 明示的にパスを指定し、既存の環境変数を上書き
 # print(f"DEBUG: load_dotenv() executed. Success: {load_success}") # デバッグ削除
@@ -24,8 +27,8 @@ load_success = load_dotenv(dotenv_path=env_path, override=True) # 明示的に�
 # print(f"DEBUG:   OBSIDIAN_VAULT={obsidian_vault_env}")
 
 # デフォルト値を持ちつつ環境変数で上書き
-PDF_PATH: Path = Path(os.getenv("PDF_PATH", "sample.pdf")) # 元の取得方法に戻す (load_dotenvで設定されるため)
-DB_PATH: Path = Path(__file__).parent / "zlr.sqlite"
+PDF_PATH: Path = Path(os.getenv("PDF_PATH", str(PROJECT_ROOT / "sample.pdf"))) # デフォルトもプロジェクトルート基準に
+DB_PATH: Path = PROJECT_ROOT / "zlr.sqlite" # プロジェクトルート基準に変更
 # print(f"DEBUG: Final PDF_PATH in config.py: {PDF_PATH}") # デバッグ削除
 
 # Obsidian Vault 関連の設定
@@ -39,6 +42,9 @@ else:
     OBSIDIAN_VAULT_BASE_PATH = Path(OBSIDIAN_VAULT_BASE_PATH_STR)
     OBSIDIAN_INBOX_PATH: Path | None = OBSIDIAN_VAULT_BASE_PATH / "zlr-inbox"
 
-WATCH_FOLDER_PATH = Path("/Users/leo/leona_ai_madeproject/zlr-dev/sample/regular")
+# WATCH_FOLDER_PATH のデフォルトもプロジェクトルート基準のサンプルパスに変更 (推奨)
+# もし環境変数で設定されていればそちらが優先される
+DEFAULT_WATCH_FOLDER = PROJECT_ROOT / "watch_folder_sample"
+WATCH_FOLDER_PATH = Path(os.getenv("ZLR_WATCH_FOLDER", str(DEFAULT_WATCH_FOLDER)))
 
-__all__ = ["PDF_PATH", "DB_PATH", "OBSIDIAN_INBOX_PATH"] 
+__all__ = ["PDF_PATH", "DB_PATH", "OBSIDIAN_INBOX_PATH", "WATCH_FOLDER_PATH", "PROJECT_ROOT"] # PROJECT_ROOT もエクスポート 

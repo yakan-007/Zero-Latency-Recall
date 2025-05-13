@@ -60,13 +60,16 @@ git clone https://github.com/your-username/zlr-dev.git # Replace with your repos
 cd zlr-dev
 python -m venv .venv
 source .venv/bin/activate  # macOS / Linux
-# .venv\\Scripts\\activate  # Windows
+# .venv\\\\Scripts\\\\activate  # Windows
 
 pip install --upgrade pip
-pip install -r requirements.txt
+# pip install -r requirements.txt # 旧い方法
+pip install -e .           # Install the project in editable mode
 
-# (Optional) For advanced features (OCR, PyMuPDF)
-pip install pytesseract Pillow pdf2image PyMuPDF opencv-python numpy
+# (Optional) For advanced features (OCR, PyMuPDF) and development
+pip install -e ".[dev]"  # Installs dependencies from pyproject.toml [project.optional-dependencies]
+                         # This includes pytesseract, Pillow, pdf2image, PyMuPDF, opencv-python, numpy,
+                         # pytest, ruff, etc.
 
 # Tesseract OCR and Poppler also need to be installed separately
 # macOS: brew install tesseract tesseract-lang poppler
@@ -82,40 +85,60 @@ pip install pytesseract Pillow pdf2image PyMuPDF opencv-python numpy
 
 ```
 .
-├── extract/                  # Main PDF extraction package
-│   ├── __main__.py           # CLI entry point
-│   ├── core/                 # Core extraction logic
-│   │   ├── extractor.py      # Extraction functions and helpers
-│   │   └── strategies.py     # BaseExtractor, SimpleExtractor, AdvancedExtractor
-│   ├── db/
-│   │   └── repo.py           # SQLite database operations
-│   ├── config.py             # Configuration file (DB path, etc.)
-│   ├── obsidian_export.py    # Obsidian integration utility
-│   └── tags_JP.yaml          # Keyword dictionary for paragraph tagging
+├── src/
+│   ├── extract/                  # Main PDF extraction package
+│   │   ├── __main__.py           # CLI entry point for extraction (invoked by `zlr extract`)
+│   │   ├── core/                 # Core extraction logic
+│   │   │   ├── extractor.py      # Extraction functions and helpers
+│   │   │   └── strategies.py     # BaseExtractor, SimpleExtractor, AdvancedExtractor
+│   │   ├── db/
+│   │   │   └── repo.py           # SQLite database operations
+│   │   ├── config.py             # Configuration file (DB path, etc.)
+│   │   ├── obsidian_export.py    # Obsidian integration utility
+│   │   └── tags_JP.yaml          # Keyword dictionary for paragraph tagging
+│   ├── zlr.py                    # Main CLI entry point (subcommands: doctor, extract, search, watch)
+│   ├── zlr_doctor.py             # System health check script
+│   ├── zlr_watch.py              # Folder watching script
+│   └── search.py                 # Search script (invoked by `zlr search`)
 ├── tests/                    # Test code
 │   ├── sample_pdfs/          # Test PDFs
-│   ├── ground_truth/         # Expected text output
-│   ├── test_accuracy.py      # Accuracy tests (Simple/Advanced)
-│   └── test_extraction_quality.py # Extraction quality tests (multi-column, etc.)
-├── search.py                 # Search script (Obsidian integration, etc.)
-├── zlr_watch.py              # Folder watching script
-├── README.md                 # This file
-└── requirements.txt          # Python dependencies
+│   └── ground_truth/         # Expected text output
+├── .env.example              # Example environment file for configuration
+├── pyproject.toml            # Project metadata, dependencies, and build configuration
+├── pytest.ini                # Pytest configuration
+├── .gitignore
+└── README.md                 # This file
 ```
 
 ---
 
 ## Usage
 
+ZLR is primarily used via the `zlr` command-line tool, which has several subcommands:
+
+*   `zlr doctor`: Checks system health and dependencies.
+*   `zlr extract`: Extracts text and metadata from PDFs.
+*   `zlr search`: Searches the extracted data.
+*   `zlr watch`: Monitors a folder for new PDFs to process automatically.
+
+You can get help for any command using the `-h` or `--help` flag, e.g., `zlr extract --help`.
+
+### System Health Check
+
+```bash
+zlr doctor
+```
+This command checks if Python, required libraries, optional dependencies, and external tools like Tesseract are correctly set up.
+
 ### Extraction
 
 ```bash
-python -m extract <PDF_files...> [--db_path <output_DB_path>] [--edition <free|pro>] [--patent] [--force_ocr] [--log-level <LEVEL>]
+zlr extract <PDF_files...> [--db_path <output_DB_path>] [--edition <free|pro>] [--patent] [--force_ocr] [--log-level <LEVEL>]
 ```
 
 *   `<PDF_files...>`: One or more PDF files to process.
-*   `--db_path`: Output SQLite file path (default: `zlr.sqlite`).
-*   `--edition`: Specify `free` (default) or `pro`. `pro` is currently equivalent to Simple.
+*   `--db_path`: Output SQLite file path (default: `<project_root>/zlr.sqlite`, configured in `src/extract/config.py`).
+*   `--edition`: Specify `free` (default) or `pro`. `pro` enables `AdvancedExtractor`.
 *   `--patent`: Enable extraction settings optimized for patent documents.
 *   `--force_ocr`: (When `pro` is specified) Force OCR on all pages.
 *   `--log-level`: Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL).
@@ -125,28 +148,29 @@ python -m extract <PDF_files...> [--db_path <output_DB_path>] [--edition <free|p
 Monitors a specified folder and automatically runs the extraction process when new PDF files are added.
 
 ```bash
-# Set environment variables (if needed)
-export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # For Obsidian integration
+# Set environment variables (if needed, or use .env file)
+# export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # For Obsidian integration
+# export ZLR_WATCH_FOLDER=/path/to/your/watch_folder # To override config
 
 # Start watching
-python zlr_watch.py
+zlr watch
 ```
 
-The watch folder is specified by `WATCH_FOLDER_PATH` in `extract/config.py`. Processing logs are displayed in the terminal during monitoring. Press `Ctrl+C` to stop.
+The watch folder is primarily configured by `WATCH_FOLDER_PATH` in `src/extract/config.py` or can be overridden by the `ZLR_WATCH_FOLDER` environment variable. Processing logs are displayed in the terminal. Press `Ctrl+C` to stop.
 
 ### Search
 
 Searches and displays content saved in the database.
 
 ```bash
-python search.py <keywords...> [-t <tags>] [-l <limit>] [-o] [--db_path <DB_path>]
+zlr search <keywords...> [-t <tags>] [-l <limit>] [-o] [--db_path <DB_path>]
 ```
 
 *   `<keywords...>`: Keywords to search for (multiple keywords perform an AND search).
 *   `-t, --tags`: Search only paragraphs with the specified tags (comma-separated).
 *   `-l, --limit`: Maximum number of results to display (default: 50).
-*   `-o, --obsidian`: Output results in Markdown format for Obsidian integration.
-*   `--db_path`: SQLite file path to search (default: `zlr.sqlite`).
+*   `-o, --obsidian`: Output results in Markdown format for Obsidian integration and save to a file.
+*   `--db_path`: SQLite file path to search (default: `<project_root>/zlr.sqlite`, configured in `src/extract/config.py`).
 
 ### Obsidian Integration
 
@@ -162,9 +186,11 @@ ZLR integrates deeply with Obsidian to incorporate PDF content into your knowled
    set OBSIDIAN_VAULT=C:\\path\\to\\your\\obsidian\\vault
    ```
    
-   For persistence, create a `.env` file in the project root:
+   For persistence, create a `.env` file in the project root (see `.env.example`):
    ```
    OBSIDIAN_VAULT=/path/to/your/obsidian/vault
+   # Optionally, define ZLR_WATCH_FOLDER here as well
+   # ZLR_WATCH_FOLDER=/path/to/your/pdf_watch_folder
    ```
 
 **Integration Features**:
@@ -182,23 +208,26 @@ This mechanism allows you to leverage Obsidian's powerful features (backlinks, t
 
 ## Basic Workflow
 
-1. **Environment Setup**:
-   ```bash
-   export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # For Obsidian integration
-   ```
+1. **Environment Setup** (once):
+   - Create a `.env` file in the project root from `.env.example` and set `OBSIDIAN_VAULT`.
+   - (Optional) Set `ZLR_WATCH_FOLDER` in `.env` or ensure the default/configured path in `src/extract/config.py` exists.
 
 2. **PDF Extraction**:
    ```bash
-   python -m extract sample.pdf
+   # Extract a single PDF
+   zlr extract sample.pdf
+
+   # Extract multiple PDFs
+   zlr extract doc1.pdf "another document.pdf"
    ```
    Or automatic processing with watch mode:
    ```bash
-   python zlr_watch.py
+   zlr watch
    ```
 
 3. **Search and Reference**:
    ```bash
-   python search.py keyword -o
+   zlr search keyword -o
    ```
    Check the `zlr-inbox` folder in Obsidian to find the search results and snippets.
 

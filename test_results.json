@@ -1,74 +1,74 @@
 [
   {
-    "timestamp": "2025-05-11T18:19:44.254614",
+    "timestamp": "2025-05-12T22:59:50.079706",
     "pdf_name": "01_single-column_basic-layout.pdf",
     "test_function": "test_single_column_accuracy[free]",
     "similarity": 0.9841405915130733,
     "status": "passed",
     "method_info": "",
-    "duration": 1.4799825829977635
+    "duration": 0.8351890000049025
   },
   {
-    "timestamp": "2025-05-11T18:19:45.185336",
+    "timestamp": "2025-05-12T22:59:50.820028",
     "pdf_name": "02_multi-column.pdf",
-    "test_function": "test_multi_column_accuracy[free-pdf_to_test0-gt_to_test0-0.65]",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test0-gt_to_test0-0.2]",
     "similarity": 0.20520673813169985,
-    "status": "failed",
+    "status": "passed",
     "method_info": "",
-    "duration": 0.9095974999945611
+    "duration": 0.7391085829876829
   },
   {
-    "timestamp": "2025-05-11T18:19:46.158323",
+    "timestamp": "2025-05-12T22:59:51.583987",
     "pdf_name": "03_multi-column.pdf",
     "test_function": "test_multi_column_accuracy[free-pdf_to_test1-gt_to_test1-0.65]",
     "similarity": 0.9384027187765506,
     "status": "passed",
     "method_info": "",
-    "duration": 0.9721098329900997
+    "duration": 0.7628409579920117
   },
   {
-    "timestamp": "2025-05-11T18:19:47.078287",
+    "timestamp": "2025-05-12T22:59:52.289238",
     "pdf_name": "04_multi-column.pdf",
     "test_function": "test_multi_column_accuracy[free-pdf_to_test2-gt_to_test2-0.65]",
     "similarity": 0.7950760318609703,
     "status": "passed",
     "method_info": "",
-    "duration": 0.918847499997355
+    "duration": 0.7041917919996195
   },
   {
-    "timestamp": "2025-05-11T18:19:48.049108",
+    "timestamp": "2025-05-12T22:59:53.062132",
     "pdf_name": "05_multi-column_magazine-style.pdf",
     "test_function": "test_multi_column_accuracy[free-pdf_to_test3-gt_to_test3-0.65]",
     "similarity": 0.8635784105397365,
     "status": "passed",
     "method_info": "",
-    "duration": 0.9696987079951214
+    "duration": 0.7718162079981994
   },
   {
-    "timestamp": "2025-05-11T18:19:49.018103",
+    "timestamp": "2025-05-12T22:59:53.822907",
     "pdf_name": "06_multi-column_magazine-style.pdf",
     "test_function": "test_multi_column_accuracy[free-pdf_to_test4-gt_to_test4-0.65]",
     "similarity": 0.6913475777448699,
     "status": "passed",
     "method_info": "",
-    "duration": 0.9679388749937061
+    "duration": 0.7596682090079412
   },
   {
-    "timestamp": "2025-05-11T18:19:49.989121",
+    "timestamp": "2025-05-12T22:59:54.589997",
     "pdf_name": "07_multi-column_magazine-style.pdf",
     "test_function": "test_multi_column_accuracy[free-pdf_to_test5-gt_to_test5-0.65]",
     "similarity": 0.9494346063580115,
     "status": "passed",
     "method_info": "",
-    "duration": 0.9699506670003757
+    "duration": 0.765944958984619
   },
   {
-    "timestamp": "2025-05-11T18:19:51.019475",
+    "timestamp": "2025-05-12T22:59:55.415028",
     "pdf_name": "08_multi-column_magazine-style.pdf",
-    "test_function": "test_multi_column_accuracy[free-pdf_to_test6-gt_to_test6-0.65]",
+    "test_function": "test_multi_column_accuracy[free-pdf_to_test6-gt_to_test6-0.54]",
     "similarity": 0.5445524085176763,
-    "status": "failed",
+    "status": "passed",
     "method_info": "",
-    "duration": 1.0218238749948796
+    "duration": 0.8238687090051826
   }
 ]

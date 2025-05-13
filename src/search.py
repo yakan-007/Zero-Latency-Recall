@@ -19,7 +19,7 @@ try:
 except ImportError:
     print("警告: config.py が見つかりません。デフォルトのDBパス 'zlr.sqlite' を使用します。", file=sys.stderr)
     # プロジェクトルートからの相対パスを想定
-    DB_PATH = Path(__file__).parent / "zlr.sqlite"
+    DB_PATH = Path(__file__).resolve().parent.parent / "zlr.sqlite" # search.py が src/ にあるので、親の親がプロジェクトルート
 
 try:
     # OBSIDIAN_INBOX_PATH はオプション扱いなので、なくてもエラーにしない
