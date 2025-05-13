@@ -1,203 +1,220 @@
 # Zero-Latency Recall (ZLR)
 
-日本語 PDF を高速かつ高精度にテキスト抽出するオープンソース・ユーティリティです。縦書き・横書き混在や複数カラムなど、実務で遭遇する多様なレイアウトを想定しています。
+ZLR (Zero-Latency Recall) is an open-source utility designed to extract information from PDF files in a local environment and **instantly (with zero latency) recall relevant information in response to search queries.** It focuses on efficiently processing Japanese PDFs with complex layouts (mixed vertical/horizontal text, multiple columns) and integrating with knowledge bases like Obsidian.
+
+**In this project, "zero latency" primarily refers to the search response speed after the database has been built. The information extraction (ingestion) process from PDFs may take time depending on the file size and complexity.**
+
+ZLR aims to be a powerful "second brain" for anyone who uses PDFs as an information source.
+
+## Project Scope and Goals
+
+ZLR provides two main functionalities:
+
+1.  **High-Accuracy PDF Extraction Toolkit**:
+    *   Text extraction capabilitiesรองรับ diverse Japanese PDF layouts.
+    *   Structured storage of extracted text and metadata (filename, page number, tags, etc.) in an SQLite database.
+2.  **Local Full-Text Search and Obsidian Integration**:
+    *   Fast full-text search leveraging SQLite FTS5.
+    *   Automatic generation of Obsidian notes for each extracted paragraph, enabling seamless knowledge base integration.
+
+Currently, the user interface is primarily command-line based (CLI), with future plans for a richer GUI and API.
 
 ---
 
-## 特長
+## Features
 
-*   **高速なテキスト抽出**: `pdfplumber` や `PyMuPDF` (`fitz`) を利用し、効率的なテキスト抽出を実現。
-*   **柔軟な抽出戦略**:
-    *   `SimpleExtractor`: `pdfplumber` ベースの基本的な抽出。
-    *   `AdvancedExtractor`: OCR (`pytesseract`) や `PyMuPDF` を組み合わせた高精度抽出（実装は拡張可能）。
-*   **マルチカラム対応**: `pdfplumber` の単語情報や `PyMuPDF` のブロック情報を用いた複数のヒューリスティックで段組みを解析。
-*   **縦書き対応**: 縦書きレイアウトを判定し、`pdfplumber` や `PyMuPDF` の縦書きモード、または OCR (`jpn_vert`) を利用。
-*   **SQLite 出力**: 抽出結果を段落単位で正規化し、`docs` (FTS5) テーブルへ保存。全文検索にそのまま利用可能。
-*   **Obsidian連携**: 抽出した段落は検索機能と連動し、Obsidianのナレッジベースに自動統合できます。
-*   **フォルダ監視機能**: 指定フォルダにPDFファイルを追加するだけで自動的に処理。
-*   **モジュール化された設計**: 抽出ロジック、DB操作、CLIが分離され、拡張性とメンテナンス性が向上。
-*   **pytest テストスイート**: Ground Truth との文字列類似度で抽出精度を評価。
+*   **Fast Text Extraction**: Utilizes `pdfplumber` and `PyMuPDF` (`fitz`) for efficient text extraction.
+*   **Flexible Extraction Strategies**:
+    *   `SimpleExtractor`: Basic extraction based on `pdfplumber`.
+    *   `AdvancedExtractor`: High-accuracy extraction combining OCR (`pytesseract`) and `PyMuPDF` (implementation is extensible).
+*   **Multi-Column Support**: Analyzes column layouts using multiple heuristics based on word information from `pdfplumber` or block information from `PyMuPDF`.
+*   **Vertical Text Support**: Detects vertical text layouts and uses `pdfplumber`'s or `PyMuPDF`'s vertical mode, or OCR (`jpn_vert`).
+*   **SQLite Output**: Normalizes extracted results paragraph by paragraph and saves them to a `docs` (FTS5) table, ready for full-text search.
+*   **Obsidian Integration**: Extracted paragraphs are linked with the search function and can be automatically integrated into an Obsidian knowledge base.
+*   **Folder Watch Feature**: Automatically processes PDF files added to a specified folder.
+*   **Modular Design**: Extraction logic, database operations, and CLI are separated for improved extensibility and maintainability.
+*   **pytest Test Suite**: Evaluates extraction accuracy by string similarity with ground truth.
 
 ---
 
-## デモ
+## Demo
 
 ```bash
-# SimpleExtractor を使用して抽出 (依存は requirements.txt のみ)
-python -m extract tests/sample_pdfs/01_single-column_basic-layout.pdf \
+# Extract using SimpleExtractor (only requires dependencies in requirements.txt)
+python -m extract tests/sample_pdfs/01_single-column_basic-layout.pdf \\
         --db_path extracted.sqlite --edition free
 
-# AdvancedExtractor を使用 (追加依存が必要、将来的に実装予定)
-# python -m extract tests/sample_pdfs/08_multi-column_magazine-style.pdf \
+# Extract using AdvancedExtractor (requires additional dependencies, planned for future implementation)
+# python -m extract tests/sample_pdfs/08_multi-column_magazine-style.pdf \\
 #         --db_path extracted.sqlite --edition pro --force_ocr
 ```
 
-抽出結果は `--db_path` で指定した SQLite ファイルの `docs` テーブルに、ファイル名・ページ・段落番号付きで保存されます。
+The extracted results are saved in the `docs` table of the SQLite file specified by `--db_path`, along with filename, page, and paragraph number.
 
 ---
 
-## インストール
+## Installation
 
 ```bash
-git clone https://github.com/your-username/zlr-dev.git # あなたのリポジトリURLに書き換えてください
+git clone https://github.com/your-username/zlr-dev.git # Replace with your repository URL
 cd zlr-dev
 python -m venv .venv
 source .venv/bin/activate  # macOS / Linux
-# .venv\Scripts\activate  # Windows
+# .venv\\Scripts\\activate  # Windows
 
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# (任意) 高度な機能 (OCR, PyMuPDF) を利用する場合
+# (Optional) For advanced features (OCR, PyMuPDF)
 pip install pytesseract Pillow pdf2image PyMuPDF opencv-python numpy
 
-# Tesseract OCR と Poppler のインストールも別途必要です
+# Tesseract OCR and Poppler also need to be installed separately
 # macOS: brew install tesseract tesseract-lang poppler
 # Ubuntu: sudo apt update && sudo apt install -y tesseract-ocr tesseract-ocr-jpn tesseract-ocr-jpn-vert poppler-utils
-# Windows: インストーラを使用し、PATH を通してください
+# Windows: Use installers and add to PATH
 ```
 
-**Python 3.9 以上**を推奨します。
+**Python 3.9 or higher** is recommended.
 
 ---
 
-## ディレクトリ構成 (主要部)
+## Directory Structure (Key Parts)
 
 ```
 .
-├── extract/                  # PDF抽出メインパッケージ
-│   ├── __main__.py           # CLI エントリポイント
-│   ├── core/                 # 抽出コアロジック
-│   │   ├── extractor.py      # 抽出関数・ヘルパー群
+├── extract/                  # Main PDF extraction package
+│   ├── __main__.py           # CLI entry point
+│   ├── core/                 # Core extraction logic
+│   │   ├── extractor.py      # Extraction functions and helpers
 │   │   └── strategies.py     # BaseExtractor, SimpleExtractor, AdvancedExtractor
 │   ├── db/
-│   │   └── repo.py           # SQLite データベース操作
-│   ├── config.py             # 設定ファイル (DBパスなど)
-│   ├── obsidian_export.py    # Obsidian連携ユーティリティ
-│   └── tags_JP.yaml          # 段落タグ付け用キーワード辞書
-├── tests/                    # テストコード
-│   ├── sample_pdfs/          # テスト用 PDF
-│   ├── ground_truth/         # 期待するテキスト出力
-│   ├── test_accuracy.py      # 精度テスト (Simple/Advanced)
-│   └── test_extraction_quality.py # 抽出品質テスト (マルチカラムなど)
-├── search.py                 # 検索スクリプト (Obsidian連携など)
-├── zlr_watch.py              # フォルダ監視スクリプト
-├── README.md                 # 本ファイル
-└── requirements.txt          # Python 依存パッケージ
+│   │   └── repo.py           # SQLite database operations
+│   ├── config.py             # Configuration file (DB path, etc.)
+│   ├── obsidian_export.py    # Obsidian integration utility
+│   └── tags_JP.yaml          # Keyword dictionary for paragraph tagging
+├── tests/                    # Test code
+│   ├── sample_pdfs/          # Test PDFs
+│   ├── ground_truth/         # Expected text output
+│   ├── test_accuracy.py      # Accuracy tests (Simple/Advanced)
+│   └── test_extraction_quality.py # Extraction quality tests (multi-column, etc.)
+├── search.py                 # Search script (Obsidian integration, etc.)
+├── zlr_watch.py              # Folder watching script
+├── README.md                 # This file
+└── requirements.txt          # Python dependencies
 ```
 
 ---
 
-## 使い方
+## Usage
 
-### 抽出 (Extract)
+### Extraction
 
 ```bash
-python -m extract <PDFファイル...> [--db_path <出力DBパス>] [--edition <free|pro>] [--patent] [--force_ocr] [--log-level <LEVEL>]
+python -m extract <PDF_files...> [--db_path <output_DB_path>] [--edition <free|pro>] [--patent] [--force_ocr] [--log-level <LEVEL>]
 ```
 
-*   `<PDFファイル...>`: 処理したい PDF ファイルを複数指定可能。
-*   `--db_path`: 出力先の SQLite ファイルパス (デフォルト: `zlr.sqlite`)。
-*   `--edition`: `free` (デフォルト) または `pro` を指定。`pro` は現在 Simple と同等。
-*   `--patent`: 特許公報向けの抽出設定を有効化。
-*   `--force_ocr`: (`pro` 指定時) 全てのページで強制的に OCR を実行。
-*   `--log-level`: ログの詳細度 (DEBUG, INFO, WARNING, ERROR, CRITICAL)。
+*   `<PDF_files...>`: One or more PDF files to process.
+*   `--db_path`: Output SQLite file path (default: `zlr.sqlite`).
+*   `--edition`: Specify `free` (default) or `pro`. `pro` is currently equivalent to Simple.
+*   `--patent`: Enable extraction settings optimized for patent documents.
+*   `--force_ocr`: (When `pro` is specified) Force OCR on all pages.
+*   `--log-level`: Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL).
 
-### フォルダ監視 (Watch)
+### Folder Watch
 
-指定されたフォルダを監視し、新しいPDFファイルが追加されると自動的に抽出処理を実行します。
+Monitors a specified folder and automatically runs the extraction process when new PDF files are added.
 
 ```bash
-# 環境変数を設定（必要に応じて）
-export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # Obsidian連携用
+# Set environment variables (if needed)
+export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # For Obsidian integration
 
-# 監視を開始
+# Start watching
 python zlr_watch.py
 ```
 
-監視フォルダは `extract/config.py` の `WATCH_FOLDER_PATH` で指定します。監視中はターミナルに処理ログが表示されます。終了するには `Ctrl+C` を押してください。
+The watch folder is specified by `WATCH_FOLDER_PATH` in `extract/config.py`. Processing logs are displayed in the terminal during monitoring. Press `Ctrl+C` to stop.
 
-### 検索 (Search)
+### Search
 
-データベースに保存した内容を検索・表示します。
+Searches and displays content saved in the database.
 
 ```bash
-python search.py <キーワード...> [-t <タグ>] [-l <上限数>] [-o] [--db_path <DBパス>]
+python search.py <keywords...> [-t <tags>] [-l <limit>] [-o] [--db_path <DB_path>]
 ```
 
-*   `<キーワード...>`: 検索したいキーワード (複数指定で AND 検索)。
-*   `-t, --tags`: 指定したタグを持つ段落のみを検索 (カンマ区切り)。
-*   `-l, --limit`: 表示する最大件数 (デフォルト: 50)。
-*   `-o, --obsidian`: 結果を Obsidian 連携用の Markdown 形式で出力。
-*   `--db_path`: 検索対象の SQLite ファイルパス (デフォルト: `zlr.sqlite`)。
+*   `<keywords...>`: Keywords to search for (multiple keywords perform an AND search).
+*   `-t, --tags`: Search only paragraphs with the specified tags (comma-separated).
+*   `-l, --limit`: Maximum number of results to display (default: 50).
+*   `-o, --obsidian`: Output results in Markdown format for Obsidian integration.
+*   `--db_path`: SQLite file path to search (default: `zlr.sqlite`).
 
-### Obsidian連携
+### Obsidian Integration
 
-ZLRはObsidianと高度に連携し、PDF内容を知識管理システムに統合できます。
+ZLR integrates deeply with Obsidian to incorporate PDF content into your knowledge management system.
 
-**設定方法**:
-1. 環境変数 `OBSIDIAN_VAULT` にObsidian Vaultのパスを設定:
+**Setup**:
+1. Set the `OBSIDIAN_VAULT` environment variable to your Obsidian Vault path:
    ```bash
    # macOS / Linux
    export OBSIDIAN_VAULT=/path/to/your/obsidian/vault
    
    # Windows
-   set OBSIDIAN_VAULT=C:\path\to\your\obsidian\vault
+   set OBSIDIAN_VAULT=C:\\path\\to\\your\\obsidian\\vault
    ```
    
-   永続化するには `.env` ファイルをプロジェクトルートに作成:
+   For persistence, create a `.env` file in the project root:
    ```
    OBSIDIAN_VAULT=/path/to/your/obsidian/vault
    ```
 
-**連携機能**:
-1. **段落スニペット**: PDF抽出時に、各段落が自動的に個別Markdownファイルとして保存されます
-   - 保存先: `<OBSIDIAN_VAULT>/zlr-inbox/zlr-snippets/`
-   - ファイル形式: YAML Front Matter + 引用ブロック形式
-   - ファイル名: `<doc_slug>_p<page>_<idx>.md`
+**Integration Features**:
+1. **Paragraph Snippets**: During PDF extraction, each paragraph is automatically saved as an individual Markdown file.
+   - Destination: `<OBSIDIAN_VAULT>/zlr-inbox/zlr-snippets/`
+   - File Format: YAML Front Matter + block quote
+   - Filename: `<doc_slug>_p<page>_<idx>.md`
 
-2. **検索結果**: 検索時に `-o` オプションを使用すると、結果が Markdown 形式で保存され、各スニペットへのリンクが含まれます
-   - 保存先: `<OBSIDIAN_VAULT>/zlr-inbox/`
+2. **Search Results**: When using the `-o` option during a search, results are saved in Markdown format and include links to each snippet.
+   - Destination: `<OBSIDIAN_VAULT>/zlr-inbox/`
 
-この仕組みにより、Obsidianの強力な機能（バックリンク、タグ、検索、Dataviewなど）を活用して知識体系を構築できます。
+This mechanism allows you to leverage Obsidian's powerful features (backlinks, tags, search, Dataview, etc.) to build your knowledge base.
 
 ---
 
-## 基本的なワークフロー
+## Basic Workflow
 
-1. **環境設定**:
+1. **Environment Setup**:
    ```bash
-   export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # Obsidian連携用
+   export OBSIDIAN_VAULT=/path/to/your/obsidian/vault  # For Obsidian integration
    ```
 
-2. **PDF抽出**:
+2. **PDF Extraction**:
    ```bash
    python -m extract sample.pdf
    ```
-   または監視モードで自動処理:
+   Or automatic processing with watch mode:
    ```bash
    python zlr_watch.py
    ```
 
-3. **検索・参照**:
+3. **Search and Reference**:
    ```bash
-   python search.py キーワード -o
+   python search.py keyword -o
    ```
-   Obsidianで `zlr-inbox` フォルダを確認すると、検索結果とスニペットが保存されています。
+   Check the `zlr-inbox` folder in Obsidian to find the search results and snippets.
 
-4. **知識活用**: ObsidianでPDF内容を参照しながら、自分のノートに引用・リンクして活用できます。
+4. **Knowledge Utilization**: Reference PDF content in Obsidian while citing and linking to your notes.
 
 ---
 
-## テスト
+## Testing
 
-Ground Truth テキストとの類似度に基づいた回帰テストを実行します。
+Runs regression tests based on similarity with Ground Truth text.
 
 ```bash
 pytest
 ```
 
-詳細なテストケースを指定することも可能です。
+You can also specify detailed test cases.
 
 ```bash
 pytest tests/test_extraction_quality.py::test_multi_column_accuracy
@@ -205,27 +222,27 @@ pytest tests/test_extraction_quality.py::test_multi_column_accuracy
 
 ---
 
-## 貢献
+## Contributing
 
-*   Issue や Pull Request は日本語 / English どちらでも歓迎します。
-*   新しいレイアウトへの対応、抽出精度の向上、パフォーマンス改善などの提案をお待ちしています。
+*   Issues and Pull Requests are welcome in either Japanese or English.
+*   We welcome proposals for supporting new layouts, improving extraction accuracy, and enhancing performance.
 
-### コーディング規約
+### Coding Conventions
 
-*   `ruff` (`black`, `isort`, `flake8` 相当) でフォーマット・Lint を実施。
-*   型ヒント (PEP 484) を可能な限り使用。
+*   Format and lint with `ruff` (equivalent to `black`, `isort`, `flake8`).
+*   Use type hints (PEP 484) as much as possible.
 
 ---
 
-## ライセンス
+## License
 
 MIT License
 
 ---
 
-## 謝辞
+## Acknowledgments
 
-本プロジェクトは以下のような優れたオープンソースソフトウェアに依存しています。
+This project relies on excellent open-source software such as:
 
 *   [pdfplumber](https://github.com/jsvine/pdfplumber)
 *   [PyMuPDF (fitz)](https://github.com/pymupdf/PyMuPDF)
@@ -236,4 +253,4 @@ MIT License
 
 ---
 
-開発・運用に関するご意見やご要望は Issue でお気軽にお知らせください。 
+Please feel free to share your opinions and requests regarding development and operation via Issues. 
